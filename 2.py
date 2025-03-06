@@ -209,7 +209,7 @@ def Run(book_id, save_path):
             pass  
 
 def main():
-    book_id = input("欢迎使用番茄小说下载器精简版！\ngithub：\n作者:Dlmos\n参考代码：https://github.com/ying-ck/fanqienovel-downloader/blob/main/src/ref_main.py\n\n请输入小说 ID：")
+    book_id = input("欢迎使用番茄小说下载器精简版！\nGithub：https://github.com/Dlmily/Tomato-Novel-Downloader-Lite\n参考代码：https://github.com/ying-ck/fanqienovel-downloader/blob/main/src/ref_main.py\n\n请输入小说 ID：")
     save_path = input("请输入保存路径：")
     
     Run(book_id, save_path)
