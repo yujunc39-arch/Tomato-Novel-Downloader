@@ -31,7 +31,11 @@ CFLAGS="-O0" pip install lxml
 
 *下载termux(链接:https://github.com/termux/termux-app/releases/tag/v0.118.1 )，用文件管理器，找到自己下载的源代码(2.py)，复制当前的目录，返回termux，输入cd+空格+复制的目录，然后回车，最后输入`python 2.py`
 
-再次回车即可
+再次回车即可。
+
+4.`为什么出现下载失败/下载内容不全现象？`
+
+防爬虫机制被触发了，建议几小时后再运行。
 
 ## 赞助/了解新产品
 https://afdian.com/a/dlbaokanluntanos
