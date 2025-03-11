@@ -33,10 +33,6 @@ CFLAGS="-O0" pip install lxml
 
 再次回车即可。
 
-4.`为什么出现下载失败/下载内容不全现象？`
-
-防爬虫机制被触发了，建议几小时后再运行。
-
 ## 赞助/了解新产品
 https://afdian.com/a/dlbaokanluntanos
 
