@@ -33,6 +33,9 @@ CFLAGS="-O0" pip install lxml
 
 再次回车即可。
 
+## 注意事项
+由于使用的是api，所以未来不知道有哪一天突然失效，如果真的出现了，请立即在“Issues”页面中回复！
+
 ## 赞助/了解新产品
 https://afdian.com/a/dlbaokanluntanos
 
