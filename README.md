@@ -3,6 +3,7 @@
 ## 我该如何使用？
 你可以通过输入书籍id以及需要保存的路径来进行下载
 你还需要依次输入以下的命令来保证程序的运行：
+(电脑端只需要运行以下命令的第4个即可)
 ```bash
 sed -i 's@^\(.*deb.*stable main\)$@#\1\ndeb https://mirrors.tuna.tsinghua.edu.cn/termux/apt/termux-main stable main@' $PREFIX/etc/apt/sources.list
 apt update && apt upgrade
