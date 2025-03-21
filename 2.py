@@ -91,7 +91,7 @@ def down_text(it, headers):
     while retry_count < max_retries:
         try:
             # 使用新API获取内容
-            api_url = f"http://rehaofan.jingluo.love/content?item_id={it}"
+            api_url = f"http://fan.jingluo.love/content?item_id={it}"   #api.fq api rehaofan yuefanqie fan
             response = requests.get(api_url, headers=headers, timeout=10)  # 超时时间
             data = response.json()
             
