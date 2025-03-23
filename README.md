@@ -30,7 +30,7 @@ CFLAGS="-O0" pip install lxml
 
 可以正常运行，为了防止有些零基础的小白下载到了此程序，我们为您准备了一些教程：
 
-*下载termux(链接:(https://github.com/termux/termux-app/releases/tag/ )，用文件管理器，找到自己下载的源代码(2.py)，复制当前的目录，返回termux，输入cd+空格+复制的目录，然后回车，最后输入`python 2.py`
+*下载termux(链接:(https://github.com/termux/termux-app/releases/tag/v0.118.1 )，用文件管理器，找到自己下载的源代码(2.py)，复制当前的目录，返回termux，输入cd+空格+复制的目录，然后回车，最后输入`python 2.py`
 
 再次回车即可。
 
