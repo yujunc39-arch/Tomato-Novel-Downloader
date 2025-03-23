@@ -74,13 +74,15 @@ def down_text(it, mod=1):
             
             if data.get("code") == 0:
                 content = data.get("data", {}).get("content", "")
-                # 清理HTML标签并保留段落结构
+                
+                # 移除HTML标签
                 content = re.sub(r'<header>.*?</header>', '', content, flags=re.DOTALL)
                 content = re.sub(r'<footer>.*?</footer>', '', content, flags=re.DOTALL)
                 content = re.sub(r'</?article>', '', content)
                 content = re.sub(r'<p idx="\d+">', '\n', content)
                 content = re.sub(r'</p>', '\n', content)
                 content = re.sub(r'<[^>]+>', '', content)
+                content = re.sub(r'\\u003c|\\u003e', '', content)
                 content = re.sub(r'\n{2,}', '\n', content).strip()
                 content = '\n'.join(['    ' + line if line.strip() else line for line in content.split('\n')])
                 break
@@ -199,18 +201,6 @@ def Run(book_id, save_path):
     if not name:
         print("无法获取书籍信息，请检查小说ID或网络连接。")
         return
-
-    # 检查是否曾经下载过该小说
-    status_file = os.path.join(save_path, CONFIG["status_file"])
-    if os.path.exists(status_file):
-        with open(status_file, 'r') as f:
-            downloaded_chapters = set(json.load(f))
-        if downloaded_chapters:
-            print(f"检测到您曾经下载过小说《{name}》。")
-            user_input = input("是否需要再次下载？如果需要请输入1并回车，如果不需要请直接回车即可返回主程序：")
-            if user_input != "1":
-                print("已取消下载，返回主程序。")
-                return
 
     # 获取章节列表
     url = f'https://fanqienovel.com/page/{book_id}'
