@@ -57,7 +57,7 @@ CFLAGS="-O0" pip install lxml
 
 6.`我是纯小白，2.py代码在哪里下载啊`
 
-直接点击此链接(https://github.com/Dlmily/Tomato-Novel-Downloader-Lite/releases/tag/ )先找到最新版本，然后在最新版本中找到”Assets”并点击来展开内容(如果已展开就不必进行此操作)。在展开的内容中找到2.py代码，点击下载即可
+直接点击此链接(https://github.com/Dlmily/Tomato-Novel-Downloader-Lite/releases/ )先找到最新版本，然后在最新版本中找到”Assets”并点击来展开内容(如果已展开就不必进行此操作)。在展开的内容中找到2.py代码，点击下载即可
 
 ## 注意事项
 由于使用的是api，所以未来不知道有哪一天突然失效，如果真的出现了，请立即在“Issues”页面中回复！
