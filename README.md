@@ -82,3 +82,5 @@ https://afdian.com/a/dlbaokanluntanos
 
 ## 感谢
 感谢用户选择此程序，如果喜欢可以加star，如果有什么对本程序的建议，请在“Issues”页面提出。您的喜欢就是我更新的最大动力❤️
+
+感谢@jingluopro的api以及对开发者帮助！
