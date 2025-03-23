@@ -59,15 +59,17 @@ def get_cookie():
             time.sleep(0.5)
     raise Exception("无法获取有效Cookie")
 
-def down_text(it, headers):
+def down_text(it, mod=1):
     """下载章节内容"""
-    max_retries = CONFIG["max_retries"]
+    max_retries = CONFIG.get('max_retries', 3)
     retry_count = 0
+    content = ""
     
     while retry_count < max_retries:
         try:
-            api_url = f"http://fan.jingluo.love/content?item_id={it}"
-            response = requests.get(api_url, headers=headers, timeout=CONFIG["request_timeout"])
+            # 使用新API获取内容
+            api_url = f"http://rehaofan.jingluo.love/content?item_id={it}"
+            response = requests.get(api_url, timeout=CONFIG["request_timeout"])
             data = response.json()
             
             if data.get("code") == 0:
@@ -81,19 +83,13 @@ def down_text(it, headers):
                 content = re.sub(r'<[^>]+>', '', content)
                 content = re.sub(r'\n{2,}', '\n', content).strip()
                 content = '\n'.join(['    ' + line if line.strip() else line for line in content.split('\n')])
-                
-                return content
-        except requests.exceptions.RequestException as e:
-            retry_count += 1
-            print(f"网络请求失败，正在重试({retry_count}/{max_retries}): {str(e)}")
-            time.sleep(2 * retry_count)
+                break
         except Exception as e:
+            print(f"请求失败: {str(e)}, 重试第{retry_count + 1}次...")
             retry_count += 1
-            print(f"下载出错，正在重试({retry_count}/{max_retries}): {str(e)}")
             time.sleep(1 * retry_count)
     
-    print("达到最大重试次数，下载失败")
-    return None
+    return content
 
 def get_book_info(book_id, headers):
     """获取书名、作者、简介"""
@@ -158,7 +154,6 @@ def extract_chapters(soup):
     actual_indices = set(ch["index"] for ch in chapters)
     if expected_indices != actual_indices:
         print("警告：章节顺序异常，可能未按阿拉伯数字顺序排列！")
-        # 自动修正顺序
         chapters.sort(key=lambda x: x["index"])
     
     return chapters
@@ -185,7 +180,7 @@ def download_chapter(chapter, headers, save_path, book_name, downloaded):
     if chapter["id"] in downloaded:
         return None
     
-    content = down_text(chapter["id"], headers)
+    content = down_text(chapter["id"])
     if content:
         output_file_path = os.path.join(save_path, f"{book_name}.txt")
         with open(output_file_path, 'a', encoding='utf-8') as f:
