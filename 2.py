@@ -72,8 +72,8 @@ def down_text(chapter_id, headers):
     
     # 定义API端点
     api_endpoints = [
-        f"https://api5-normal-lq.fqnovel.com/reading/bookapi/detail/v/?item_id={chapter_id}",
-        f"https://novel.snssdk.com/api/novel/book/reader/full/v1/?item_id={chapter_id}"
+        f"http://fan.jingluo.love/content?item_id={chapter_id}",
+        f"http://rehaofan.jingluo.love/content?item_id={chapter_id}"
     ]
     
     while retry_count < max_retries:
@@ -289,7 +289,7 @@ def Run(book_id, save_path):
         success_count = 0
 
         # 顺序下载
-        sequential_chapters = todo_chapters[:3]
+        sequential_chapters = todo_chapters[:5]
         for chapter in sequential_chapters:
             time.sleep(random.uniform(1, 3))  # 随机延迟
             result = download_chapter(chapter, headers, save_path, name, downloaded)
@@ -299,7 +299,7 @@ def Run(book_id, save_path):
                 success_count += 1
 
         # 使用多线程下载剩余章节
-        remaining_chapters = todo_chapters[3:]
+        remaining_chapters = todo_chapters[5:]
         if remaining_chapters:
             with ThreadPoolExecutor(max_workers=CONFIG["max_workers"]) as executor:
                 futures = {
