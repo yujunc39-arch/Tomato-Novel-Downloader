@@ -20,6 +20,14 @@ CONFIG = {
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/119.0",
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"
+    ],
+    "api_endpoints": [
+        "https://lsjk.zyii.xyz:3666/content?item_id={chapter_id}",
+        "http://api.jingluo.love/content?item_id={chapter_id}",
+        "http://fan.jingluo.love/content?item_id={chapter_id}",
+        "http://apifq.jingluo.love/content?item_id={chapter_id}",
+        "http://rehaofan.jingluo.love/content?item_id={chapter_id}",
+        "http://yuefanqie.jingluo.love/content?item_id={chapter_id}"
     ]
 }
 
@@ -68,47 +76,83 @@ def get_cookie():
 def down_text(chapter_id, headers):
     """下载章节内容"""
     max_retries = CONFIG["max_retries"]
-    retry_count = 0
     content = ""
     chapter_title = ""
     
-    # 定义API端点
-    api_endpoint = f"https://lsjk.zyii.xyz:3666/content?item_id={chapter_id}"
+    # 记录API端点状态
+    if not hasattr(down_text, "api_status"):
+        down_text.api_status = {endpoint: {"failures": 0, "last_success": 0} 
+                              for endpoint in CONFIG["api_endpoints"]}
     
-    while retry_count < max_retries:
-        try:
-            # 添加随机延迟
-            time.sleep(random.uniform(0.2, 1))
+    # 端点状态排序
+    sorted_endpoints = sorted(
+        CONFIG["api_endpoints"],
+        key=lambda x: (
+            -down_text.api_status[x]["last_success"],
+            down_text.api_status[x]["failures"]
+        )
+    )
+    
+    for api_endpoint in sorted_endpoints:
+        current_endpoint = api_endpoint.format(chapter_id=chapter_id)
+        retry_count = 0
+        
+        if down_text.api_status[api_endpoint]["failures"] >= max_retries:
+            continue
             
-            response = requests.get(api_endpoint, headers=headers, timeout=CONFIG["request_timeout"])
-            data = response.json()
-            
-            # 检查API响应格式
-            if data.get("code") == 0:
-                content = data.get("data", {}).get("content", "")
-                chapter_title = data.get("data", {}).get("title", "")
+        while retry_count < max_retries:
+            try:
+                # 添加随机延迟
+                time.sleep(random.uniform(0.2, 1))
                 
-                if chapter_title and re.match(r'^第[0-9]+章', chapter_title):
-                    chapter_title = re.sub(r'^第[0-9]+章\s*', '', chapter_title)
+                response = requests.get(
+                    current_endpoint, 
+                    headers=headers, 
+                    timeout=CONFIG["request_timeout"]
+                )
+                data = response.json()
                 
-                if content:
-                    # 提取正文内容
-                    paragraphs = re.findall(r'<p idx="\d+">(.*?)</p>', content)
-                    cleaned_content = "\n".join([p.strip() for p in paragraphs if p.strip()])
+                if data.get("code") == 0:
+                    content = data.get("data", {}).get("content", "")
+                    chapter_title = data.get("data", {}).get("title", "")
                     
-                    # 格式化输出
-                    formatted_content = '\n'.join(['    ' + line if line.strip() else line for line in cleaned_content.split('\n')])
-                    return chapter_title, formatted_content
+                    # 处理标题
+                    if not chapter_title and "<div class=\"tt-title\">" in content:
+                        chapter_title = re.search(r'<div class="tt-title">(.*?)</div>', content).group(1)
+                    
+                    if chapter_title and re.match(r'^第[0-9]+章', chapter_title):
+                        chapter_title = re.sub(r'^第[0-9]+章\s*', '', chapter_title)
+                    
+                    if content:
+                        down_text.api_status[api_endpoint]["last_success"] = time.time()
+                        down_text.api_status[api_endpoint]["failures"] = 0
+                        
+                        # 提取内容
+                        if "lsjk.zyii.xyz" in api_endpoint:
+                            paragraphs = re.findall(r'<p idx="\d+">(.*?)</p>', content)
+                        else:
+                            paragraphs = re.findall(r'<p>(.*?)</p>', content)
+                        
+                        cleaned_content = "\n".join([p.strip() for p in paragraphs if p.strip()])
+                        formatted_content = '\n'.join(['    ' + line if line.strip() else line 
+                                                     for line in cleaned_content.split('\n')])
+                        return chapter_title, formatted_content
+                else:
+                    raise Exception(f"API返回错误代码: {data.get('code')}")
                 
-        except requests.exceptions.RequestException as e:
-            retry_count += 1
-            print(f"网络请求失败，正在重试({retry_count}/{max_retries}): {str(e)}")
-            time.sleep(2 * retry_count)
-        except Exception as e:
-            retry_count += 1
-            print(f"下载出错，正在重试({retry_count}/{max_retries}): {str(e)}")
-            time.sleep(1 * retry_count)
+            except requests.exceptions.RequestException as e:
+                retry_count += 1
+                down_text.api_status[api_endpoint]["failures"] += 1
+                print(f"API端点 {api_endpoint} 请求失败，正在重试({retry_count}/{max_retries}): {str(e)}")
+                time.sleep(2 * retry_count)
+                
+            except Exception as e:
+                retry_count += 1
+                down_text.api_status[api_endpoint]["failures"] += 1
+                print(f"API端点 {api_endpoint} 处理出错，正在重试({retry_count}/{max_retries}): {str(e)}")
+                time.sleep(1 * retry_count)
     
+    print("所有API端点尝试失败")
     return None, None
 
 def get_chapters_from_api(book_id, headers):
@@ -265,7 +309,7 @@ def Run(book_id, save_path):
             with open(output_file_path, 'w', encoding='utf-8') as f:
                 f.write(f"小说名: {name}\n作者: {author_name}\n内容简介: {description}\n\n")
 
-        # 多线程下载并顺序写入
+        # 多线程变量
         success_count = 0
         failed_chapters = []
         chapter_results = {}
@@ -312,7 +356,6 @@ def Run(book_id, save_path):
         # 保存下载状态
         save_status(save_path, downloaded)
 
-        # 输出失败章节信息
         if failed_chapters:
             print(f"\n以下章节下载失败: {', '.join(failed_chapters)}")
             with open(os.path.join(save_path, "failed_chapters.txt"), 'w', encoding='utf-8') as f:
@@ -328,7 +371,7 @@ def main():
 作者：Dlmos（Dlmily）
 Github：https://github.com/Dlmily/Tomato-Novel-Downloader-Lite
 赞助/了解新产品：https://afdian.com/a/dlbaokanluntanos
-*使用前须知*：开始下载之后，您可能会过于着急而查看下载文件的位置，这是徒劳的，请耐心等待小说下载完成再查看！另外如果你要下载之前已经下载过的小说(在此之前已经删除了原txt文件)，那么你有可能会遇到“所有章节已是最新，无需下载”的情况，这时就请删除掉chapter.json，然后再次运行程序。
+*使用前须知*：开始下载之后，您可能会过于着急而查看下载文件的位置，这是徒劳的，请耐心等待小说下载完成再查看！另外如果你要下载之前已经下载过的小说(在此之前已经删除了原txt文件)，那么你有可能会遇到"所有章节已是最新，无需下载"的情况，这时就请删除掉chapter.json，然后再次运行程序。
 ------------------------------------------""")
     
     while True:
