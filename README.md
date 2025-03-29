@@ -89,4 +89,4 @@ https://afdian.com/a/dlbaokanluntanos
 
 感谢来自Github用户@jingluopro的api！！
 
-感谢所有赞助此程序的赞助者们！
+感谢所有赞助此程序的赞助者们！！！
