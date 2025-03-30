@@ -62,8 +62,6 @@ jobs:
             --name=TomatoNovelDownloader-Linux_amd64-$VERSION \
             --clean \
             2.py
-
-          chmod +x dist/TomatoNovelDownloader-Linux_amd64-$VERSION
       
       - name: Upload Linux Artifact
         uses: actions/upload-artifact@v4
