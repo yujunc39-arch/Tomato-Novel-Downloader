@@ -57,6 +57,9 @@ jobs:
           pyinstaller \
             --onefile \
             --upx-dir="$UPX_DIR" \
+						--strip \  # 移除调试符号
+      			--exclude-module _bootlocale \
+						--exclude-module _cffi_backend \
             --name=TomatoNovelDownloader-Linux_amd64-$VERSION \
             --clean \
             2.py
