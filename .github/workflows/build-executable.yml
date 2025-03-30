@@ -57,14 +57,14 @@ jobs:
           pyinstaller \
             --onefile \
             --upx-dir="$UPX_DIR" \
-            --name=TomatoNovelDownloader-$VERSION \
+            --name=TomatoNovelDownloader-Linux_amd64-$VERSION \
             --clean \
             2.py
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: TomatoNovelDownloader-Build-${{ github.sha }}
+          name: TomatoNovelDownloader-LinuxBuild-${{ github.sha }}
           path: dist/TomatoNovelDownloader-*
 
       - name: Publish to Release
@@ -123,14 +123,14 @@ jobs:
         # GUI版本构建命令
         pyinstaller --onefile `
           --upx-dir "$upxDir" `
-          --name=TomatoNovelDownloader-$version `
+          --name=TomatoNovelDownloader-Win64-$version `
           --clean `
           2.py
 
     - name: Upload Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: TomatoNovelDownloader-Build-${{ github.sha }}
+        name: TomatoNovelDownloader-WinBuild-${{ github.sha }}
         path: dist\TomatoNovelDownloader-*.exe
 
     - name: Publish to Release
