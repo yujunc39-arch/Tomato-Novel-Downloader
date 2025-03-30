@@ -75,7 +75,6 @@ def get_cookie():
 
 def down_text(chapter_id, headers):
     """下载章节内容"""
-    max_retries = CONFIG["max_retries"]
     content = ""
     chapter_title = ""
     
@@ -96,65 +95,59 @@ def down_text(chapter_id, headers):
         
         for api_endpoint in sorted_endpoints:
             current_endpoint = api_endpoint.format(chapter_id=chapter_id)
-            retry_count = 0
             
-            if down_text.api_status[api_endpoint]["failures"] >= max_retries:
-                continue
+            try:
+                # 添加随机延迟
+                time.sleep(random.uniform(0.2, 1))
                 
-            while retry_count < max_retries:
-                try:
-                    # 添加随机延迟
-                    time.sleep(random.uniform(0.2, 1))
+                response = requests.get(
+                    current_endpoint, 
+                    headers=headers, 
+                    timeout=CONFIG["request_timeout"]
+                )
+                data = response.json()
+                
+                if data.get("code") == 0:
+                    content = data.get("data", {}).get("content", "")
+                    chapter_title = data.get("data", {}).get("title", "")
                     
-                    response = requests.get(
-                        current_endpoint, 
-                        headers=headers, 
-                        timeout=CONFIG["request_timeout"]
-                    )
-                    data = response.json()
+                    # 处理标题
+                    if not chapter_title and "<div class=\"tt-title\">" in content:
+                        chapter_title = re.search(r'<div class="tt-title">(.*?)</div>', content).group(1)
                     
-                    if data.get("code") == 0:
-                        content = data.get("data", {}).get("content", "")
-                        chapter_title = data.get("data", {}).get("title", "")
-                        
-                        # 处理标题
-                        if not chapter_title and "<div class=\"tt-title\">" in content:
-                            chapter_title = re.search(r'<div class="tt-title">(.*?)</div>', content).group(1)
-                        
-                        if chapter_title and re.match(r'^第[0-9]+章', chapter_title):
-                            chapter_title = re.sub(r'^第[0-9]+章\s*', '', chapter_title)
-                        
-                        if content:
-                            down_text.api_status[api_endpoint]["last_success"] = time.time()
-                            down_text.api_status[api_endpoint]["failures"] = 0
-                            
-                            # 提取内容
-                            if "lsjk.zyii.xyz" in api_endpoint:
-                                paragraphs = re.findall(r'<p idx="\d+">(.*?)</p>', content)
-                            else:
-                                paragraphs = re.findall(r'<p>(.*?)</p>', content)
-                            
-                            cleaned_content = "\n".join([p.strip() for p in paragraphs if p.strip()])
-                            formatted_content = '\n'.join(['    ' + line if line.strip() else line 
-                                                         for line in cleaned_content.split('\n')])
-                            return chapter_title, formatted_content
-                    else:
-                        raise Exception(f"API返回错误代码: {data.get('code')}")
+                    if chapter_title and re.match(r'^第[0-9]+章', chapter_title):
+                        chapter_title = re.sub(r'^第[0-9]+章\s*', '', chapter_title)
                     
-                except requests.exceptions.RequestException as e:
-                    retry_count += 1
+                    if content:
+                        down_text.api_status[api_endpoint]["last_success"] = time.time()
+                        down_text.api_status[api_endpoint]["failures"] = 0
+                        
+                        # 提取内容
+                        if "lsjk.zyii.xyz" in api_endpoint:
+                            paragraphs = re.findall(r'<p idx="\d+">(.*?)</p>', content)
+                        else:
+                            paragraphs = re.findall(r'<p>(.*?)</p>', content)
+                        
+                        cleaned_content = "\n".join([p.strip() for p in paragraphs if p.strip()])
+                        formatted_content = '\n'.join(['    ' + line if line.strip() else line 
+                                                     for line in cleaned_content.split('\n')])
+                        return chapter_title, formatted_content
+                else:
+                    print(f"API端点 {api_endpoint} 返回错误代码: {data.get('code')}")
                     down_text.api_status[api_endpoint]["failures"] += 1
-                    print(f"API端点 {api_endpoint} 请求失败，正在重试({retry_count}/{max_retries}): {str(e)}")
-                    time.sleep(2 * retry_count)
-                    
-                except Exception as e:
-                    retry_count += 1
-                    down_text.api_status[api_endpoint]["failures"] += 1
-                    print(f"API端点 {api_endpoint} 处理出错，正在重试({retry_count}/{max_retries}): {str(e)}")
-                    time.sleep(1 * retry_count)
+                
+            except requests.exceptions.RequestException as e:
+                print(f"API端点 {api_endpoint} 请求失败: {str(e)}")
+                down_text.api_status[api_endpoint]["failures"] += 1
+                time.sleep(2)
+                
+            except Exception as e:
+                print(f"API端点 {api_endpoint} 处理出错: {str(e)}")
+                down_text.api_status[api_endpoint]["failures"] += 1
+                time.sleep(1)
         
-        print("所有API端点尝试失败，将重新尝试...请等待三秒。")
-        time.sleep(3)
+        print("所有API端点尝试失败，将立即重新尝试...")
+        time.sleep(1)
 
 def get_chapters_from_api(book_id, headers):
     """从API获取章节列表"""
