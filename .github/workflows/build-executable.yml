@@ -32,17 +32,8 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller
 
-      - name: Download UPX
-        run: |
-          wget https://github.com/upx/upx/releases/download/v5.0.0/upx-5.0.0-amd64_linux.tar.xz
-          tar -xJf upx-5.0.0-amd64_linux.tar.xz
-          mv upx-5.0.0-amd64_linux upx
-
       - name: Build Executable
         run: |
-          UPX_DIR="$PWD/upx"
-          chmod +x $UPX_DIR/upx
-
           if [ "${{ github.ref_type }}" = "tag" ]; then
             VERSION="v${{ github.ref_name }}"
           else
@@ -51,7 +42,6 @@ jobs:
 
           pyinstaller \
             --onefile \
-            --upx-dir="$UPX_DIR" \
             --strip \
             --exclude-module _bootlocale \
             --exclude-module _cffi_backend \
