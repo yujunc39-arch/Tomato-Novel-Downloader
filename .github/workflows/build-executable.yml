@@ -41,18 +41,14 @@ jobs:
       - name: Build Executable
         run: |
           UPX_DIR="$PWD/upx"
-          
-          # 赋予 UPX 执行权限
           chmod +x $UPX_DIR/upx
 
-          # 版本号处理
           if [ "${{ github.ref_type }}" = "tag" ]; then
             VERSION="v${{ github.ref_name }}"
           else
             VERSION="sha-${{ github.sha }}"
           fi
 
-          # 构建命令
           pyinstaller \
             --onefile \
             --upx-dir="$UPX_DIR" \
@@ -114,7 +110,6 @@ jobs:
             $version = "sha-${{ github.sha }}"
           }
         
-          # GUI版本构建命令
           pyinstaller --onefile `
             --upx-dir "$upxDir" `
             --name=TomatoNovelDownloader-Win64-$version `
@@ -127,16 +122,82 @@ jobs:
           name: windows-build
           path: dist\TomatoNovelDownloader-*.exe
 
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Cache Dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Download UPX
+        run: |
+          curl -LO https://github.com/upx/upx/releases/download/v5.0.0/upx-5.0.0-arm64_macos.tar.xz
+          tar -xJf upx-5.0.0-arm64_macos.tar.xz
+          mv upx-5.0.0-arm64_macos upx
+
+      - name: Build Executable
+        run: |
+          UPX_DIR="$PWD/upx"
+          chmod +x "$UPX_DIR/upx"
+          
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            VERSION="v${{ github.ref_name }}"
+          else
+            VERSION="sha-${{ github.sha }}"
+          fi
+
+          pyinstaller \
+            --onefile \
+            --upx-dir="$UPX_DIR" \
+            --strip \
+            --exclude-module _bootlocale \
+            --exclude-module _cffi_backend \
+            --name=TomatoNovelDownloader-macOS_arm64-$VERSION \
+            --clean \
+            2.py
+
+      - name: Upload macOS Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-build
+          path: dist/TomatoNovelDownloader-macOS_arm64-*
+
   publish-release:
-    needs: [build-linux, build-windows]
+    needs: [build-linux, build-windows, build-macos]
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     
     steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
       - name: Download All Artifacts
         uses: actions/download-artifact@v4
         with:
           path: release-artifacts
+
+      - name: Copy Source File
+        run: |
+          mkdir -p release-artifacts/source
+          cp 2.py release-artifacts/source/
 
       - name: List Artifacts
         run: ls -R release-artifacts
@@ -148,3 +209,5 @@ jobs:
           files: |
             release-artifacts/linux-build/TomatoNovelDownloader-Linux_amd64-*
             release-artifacts/windows-build/TomatoNovelDownloader-Win64-*.exe
+            release-artifacts/macos-build/TomatoNovelDownloader-macOS_arm64-*
+            release-artifacts/source/2.py
