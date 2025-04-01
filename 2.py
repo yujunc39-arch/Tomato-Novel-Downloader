@@ -9,6 +9,13 @@ import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm import tqdm
 from collections import OrderedDict
+from fake_useragent import UserAgent
+from typing import Optional, Dict
+
+# 初始化动态UA生成器
+ua = UserAgent(
+    fallback="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"
+)
 
 # 全局配置
 CONFIG = {
@@ -16,11 +23,6 @@ CONFIG = {
     "max_retries": 3,
     "request_timeout": 15,
     "status_file": "chapter.json",
-    "user_agents": [
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/119.0",
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"
-    ],
     "api_endpoints": [
         "https://lsjk.zyii.xyz:3666/content?item_id={chapter_id}",
         "http://api.jingluo.love/content?item_id={chapter_id}",
@@ -32,56 +34,24 @@ CONFIG = {
     ]
 }
 
-def get_headers(cookie=None):
+def get_headers() -> Dict[str, str]:
     """生成随机请求头"""
-    headers = {
-        "User-Agent": random.choice(CONFIG["user_agents"]),
-        "Accept": "application/json, text/plain, */*",
-        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
-        "Connection": "keep-alive"
+    return {
+        "User-Agent": ua.random,
+        "Accept": "application/json, text/javascript, */*; q=0.01",
+        "Accept-Language": "zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7",
+        "Referer": "https://fanqienovel.com/",
+        "X-Requested-With": "XMLHttpRequest",
     }
-    if cookie:
-        headers["Cookie"] = cookie
-    return headers
-
-def get_cookie():
-    """生成或加载Cookie"""
-    cookie_path = "cookie.json"
-    if os.path.exists(cookie_path):
-        try:
-            with open(cookie_path, 'r') as f:
-                return f.read().strip()
-        except:
-            pass
-    
-    # 生成新Cookie
-    for _ in range(3):
-        novel_web_id = random.randint(10**18, 10**19-1)
-        cookie = f'novel_web_id={novel_web_id}'
-        try:
-            resp = requests.get(
-                'https://fanqienovel.com',
-                headers={"User-Agent": random.choice(CONFIG["user_agents"])},
-                cookies={"novel_web_id": str(novel_web_id)},
-                timeout=10
-            )
-            if resp.ok:
-                with open(cookie_path, 'w') as f:
-                    f.write(cookie)
-                return cookie
-        except Exception as e:
-            print(f"Cookie生成失败: {str(e)}")
-            time.sleep(1)
-    raise Exception("无法获取有效Cookie")
 
 def down_text(chapter_id, headers, book_id=None):
     """下载章节内容"""
     content = ""
     chapter_title = ""
     
-    # 初始化API端点状态记录
+    # 初始化API端点状态
     if not hasattr(down_text, "api_status"):
-        down_text.api_status = {endpoint: {"failures": 0, "last_success": 0, "last_response_time": float('inf')} 
+        down_text.api_status = {endpoint: {"last_response_time": float('inf')} 
                               for endpoint in CONFIG["api_endpoints"]}
     
     while True:
@@ -89,15 +59,11 @@ def down_text(chapter_id, headers, book_id=None):
             CONFIG["api_endpoints"],
             key=lambda x: (
                 0 if "111.119.200.85" in x else 1,
-                down_text.api_status[x]["last_response_time"],
-                down_text.api_status[x]["failures"]
+                down_text.api_status[x]["last_response_time"]
             )
         )
         
         for api_endpoint in sorted_endpoints:
-            if down_text.api_status[api_endpoint]["failures"] > 5:
-                continue
-                
             # 格式化URL
             if "{book_id}" in api_endpoint:
                 if not book_id:
@@ -110,8 +76,8 @@ def down_text(chapter_id, headers, book_id=None):
                 current_endpoint = api_endpoint.format(chapter_id=chapter_id)
             
             try:
-                # 添加延迟
-                time.sleep(random.uniform(0.1, 0.5))
+                # 随机延迟
+                time.sleep(random.uniform(0.5, 1))
                 
                 start_time = time.time()
                 response = requests.get(
@@ -124,82 +90,50 @@ def down_text(chapter_id, headers, book_id=None):
                 
                 data = response.json()
                 
-                # 处理API端点
+                # 处理API端点响应
                 if "111.119.200.85" in api_endpoint:
-                    content = data.get("content", "")
-                    if not content:
-                        content = data.get("data", {}).get("content", "")
-                    
-                    # 提取标题
+                    content = data.get("content", "") or data.get("data", {}).get("content", "")
                     chapter_title = data.get("title", "")
                     if not chapter_title:
                         if "<h1" in content:
-                            match = re.search(r'<h1[^>]*>(.*?)</h1>', content)
-                            if match:
-                                chapter_title = match.group(1)
+                            chapter_title = re.search(r'<h1[^>]*>(.*?)</h1>', content).group(1)
                         elif "<title" in content:
-                            match = re.search(r'<title[^>]*>(.*?)</title>', content)
-                            if match:
-                                chapter_title = match.group(1)
-                    
-                    if not content:
-                        raise ValueError("新API端点返回空内容")
+                            chapter_title = re.search(r'<title[^>]*>(.*?)</title>', content).group(1)
                 else:
-                    # 处理其他API端点
                     content = data.get("data", {}).get("content", "")
                     chapter_title = data.get("data", {}).get("title", "")
                 
                 # 统一处理标题
                 if not chapter_title and "<div class=\"tt-title\">" in content:
                     chapter_title = re.search(r'<div class="tt-title">(.*?)</div>', content).group(1)
-                
                 if chapter_title and re.match(r'^第[0-9]+章', chapter_title):
                     chapter_title = re.sub(r'^第[0-9]+章\s*', '', chapter_title)
                 
                 if content:
-                    # 更新端点状态
-                    down_text.api_status[api_endpoint]["last_success"] = time.time()
-                    down_text.api_status[api_endpoint]["failures"] = 0
-                    
                     # 提取内容段落
                     if "lsjk.zyii.xyz" in api_endpoint:
                         paragraphs = re.findall(r'<p idx="\d+">(.*?)</p>', content)
                     elif "111.119.200.85" in api_endpoint:
-                        if "<p>" in content:
-                            paragraphs = re.findall(r'<p>(.*?)</p>', content)
-                        else:
-                            paragraphs = [content]
+                        paragraphs = re.findall(r'<p>(.*?)</p>', content) if "<p>" in content else [content]
                     else:
                         paragraphs = re.findall(r'<p>(.*?)</p>', content)
                     
-                    # 清理和格式化内容
-                    cleaned_content = "\n".join([p.strip() for p in paragraphs if p.strip()])
-                    formatted_content = '\n'.join(['    ' + line if line.strip() else line 
-                                                 for line in cleaned_content.split('\n')])
+                    # 格式化内容
+                    cleaned_content = "\n".join(p.strip() for p in paragraphs if p.strip())
+                    formatted_content = '\n'.join('    ' + line if line.strip() else line 
+                                                for line in cleaned_content.split('\n'))
                     return chapter_title, formatted_content
                 
-                down_text.api_status[api_endpoint]["failures"] += 1
-                print(f"API端点 {api_endpoint} 返回空内容")
-                
-            except requests.exceptions.RequestException as e:
-                down_text.api_status[api_endpoint]["failures"] += 1
-                print(f"API端点 {api_endpoint} 请求失败: {str(e)}")
-                if "111.119.200.85" in api_endpoint:
-                    print(f"调试信息 - 请求URL: {current_endpoint}")
-                    if 'response' in locals():
-                        print(f"调试信息 - 状态码: {response.status_code}")
-                        print(f"调试信息 - 响应内容: {response.text[:200]}...")
-                time.sleep(1)
+                print(f"API端点 {api_endpoint} 返回空内容，继续尝试...")
                 
             except Exception as e:
-                down_text.api_status[api_endpoint]["failures"] += 1
-                print(f"API端点 {api_endpoint} 处理出错: {str(e)}")
-                if "111.119.200.85" in api_endpoint and 'data' in locals():
-                    print(f"调试信息 - 返回数据: {json.dumps(data, ensure_ascii=False)[:200]}...")
-                time.sleep(1)
-        
-        print("所有API端点尝试失败，将立即重新尝试...")
-        time.sleep(1)
+                print(f"API端点 {api_endpoint} 请求失败: {str(e)}")
+                if "111.119.200.85" in api_endpoint:
+                    print(f"调试信息 - URL: {current_endpoint}")
+                    if 'response' in locals():
+                        print(f"状态码: {response.status_code}")
+                        print(f"响应片段: {response.text[:200]}...")
+                time.sleep(3)
 
 def get_chapters_from_api(book_id, headers):
     """从API获取章节列表"""
@@ -317,7 +251,7 @@ def save_status(save_path, downloaded):
 def Run(book_id, save_path):
     """运行下载"""
     try:
-        headers = get_headers(get_cookie())
+        headers = get_headers()
         
         # 获取章节列表
         chapters = get_chapters_from_api(book_id, headers)
