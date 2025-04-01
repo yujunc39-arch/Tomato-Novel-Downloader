@@ -5,12 +5,16 @@ import re
 import os
 import random
 import json
+import urllib3
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm import tqdm
 from collections import OrderedDict
 from fake_useragent import UserAgent
 from typing import Optional, Dict
+
+# 禁用SSL证书验证警告
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # 初始化动态UA生成器
 ua = UserAgent(
@@ -30,7 +34,7 @@ CONFIG = {
         "http://apifq.jingluo.love/content?item_id={chapter_id}",
         "http://rehaofan.jingluo.love/content?item_id={chapter_id}",
         "http://yuefanqie.jingluo.love/content?item_id={chapter_id}",
-        "http://111.119.200.85/reader?item_id={chapter_id}&book_id={book_id}&tone_id=-1&key=uSo1sPoqQypQEF8k&device=android"
+        "http://189.1.216.209:5000/reader?item_id={chapter_id}&book_id={book_id}&tone_id=-1&key=uSo1sPoqQypQEF8k&device=android"
     ]
 }
 
@@ -58,7 +62,7 @@ def down_text(chapter_id, headers, book_id=None):
         sorted_endpoints = sorted(
             CONFIG["api_endpoints"],
             key=lambda x: (
-                0 if "111.119.200.85" in x else 1,
+                0 if "189.1.216.209" in x else 1,
                 down_text.api_status[x]["last_response_time"]
             )
         )
@@ -83,7 +87,8 @@ def down_text(chapter_id, headers, book_id=None):
                 response = requests.get(
                     current_endpoint, 
                     headers=headers, 
-                    timeout=CONFIG["request_timeout"]
+                    timeout=CONFIG["request_timeout"],
+                    verify=False
                 )
                 response_time = time.time() - start_time
                 down_text.api_status[api_endpoint]["last_response_time"] = response_time
@@ -91,7 +96,7 @@ def down_text(chapter_id, headers, book_id=None):
                 data = response.json()
                 
                 # 处理API端点响应
-                if "111.119.200.85" in api_endpoint:
+                if "189.1.216.209" in api_endpoint:
                     content = data.get("content", "") or data.get("data", {}).get("content", "")
                     chapter_title = data.get("title", "")
                     if not chapter_title:
@@ -113,7 +118,7 @@ def down_text(chapter_id, headers, book_id=None):
                     # 提取内容段落
                     if "lsjk.zyii.xyz" in api_endpoint:
                         paragraphs = re.findall(r'<p idx="\d+">(.*?)</p>', content)
-                    elif "111.119.200.85" in api_endpoint:
+                    elif "189.1.216.209" in api_endpoint:
                         paragraphs = re.findall(r'<p>(.*?)</p>', content) if "<p>" in content else [content]
                     else:
                         paragraphs = re.findall(r'<p>(.*?)</p>', content)
@@ -128,7 +133,7 @@ def down_text(chapter_id, headers, book_id=None):
                 
             except Exception as e:
                 print(f"API端点 {api_endpoint} 请求失败: {str(e)}")
-                if "111.119.200.85" in api_endpoint:
+                if "189.1.216.209" in api_endpoint:
                     print(f"调试信息 - URL: {current_endpoint}")
                     if 'response' in locals():
                         print(f"状态码: {response.status_code}")
