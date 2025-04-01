@@ -1,5 +1,5 @@
 # 番茄小说下载器精简版
-如你所见，这个程序只有不到18kb的python文件，但这不影响它的功能！这个程序简单易操作，可以满足你的小说下载需求，需要运行此程序的话，最好是在终端中，以下的所有需要输入的内容都需要在终端中进行，并且在使用此程序之前，您必须先安装python！
+如你所见，这个程序只有不到15kb的python文件，但这不影响它的功能！这个程序简单易操作，可以满足你的小说下载需求，需要运行此程序的话，最好是在终端中，以下的所有需要输入的内容都需要在终端中进行，并且在使用此程序之前，您必须先安装python！
 ## 我该如何使用？
 你可以通过输入书籍id以及需要保存的路径来进行下载
 你还需要依次输入以下的命令来保证程序的运行：
@@ -8,7 +8,7 @@
 sed -i 's@^\(deb.*stable main\)$@#\1\ndeb https://mirrors.tuna.tsinghua.edu.cn/termux/apt/termux-main stable main@' $PREFIX/etc/apt/sources.list
 apt update && apt upgrade
 pkg install python
-pip install requests beautifulsoup4 lxml tqdm
+pip install requests beautifulsoup4 lxml tqdm fake-useragent
 ```
 ## 常见问题
 1.`之前就已经有了一个下载器，为什么还要再做一个？`
