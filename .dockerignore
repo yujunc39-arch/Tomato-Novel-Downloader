@@ -1,0 +1,10 @@
+target/
+Tomato-Novel-Official-API/target/
+.git/
+.github/
+logs/
+novels/
+img/*
+!img/Tomato-downloader-ico.ico
+*.log
+*.tmp
