@@ -73,8 +73,17 @@ cd Android/TomatoWeb
 ./gradlew --init-script ../gradle-init.gradle assembleRelease
 ```
 
-**签名**：`Android/TomatoWeb/dual_sign.py` 做 V1 + V2 双签名
-（zipalign → apksigner 签 V2 → 追加 JAR 签名，不破坏 V2 块）。
+**签名**：密钥材料**不在仓库里**。构建前二选一：
+```bash
+# 方式 A：环境变量
+export TOMATO_KS_FILE=../release.jks
+export TOMATO_KS_PASS='你的口令'
+export TOMATO_KS_ALIAS=release
+
+# 方式 B：本地 keystore.properties（复制 keystore.properties.example 修改）
+```
+`Android/TomatoWeb/dual_sign.py` 做 V1 + V2 双签名（zipalign → apksigner 签 V2 → 追加 JAR 签名，
+不破坏 V2 块），同样从环境变量 `TOMATO_KS_*` 读取密钥，并需要 `TOMATO_APK` 指向待签名 APK。
 
 > ⚠️ 改了 `targetSdk` 要小心：必须保持 **28**。
 > Android 10+ 会把 `filesDir` 挂载为 `noexec`，`targetSdk` 升到 29+ 就无法执行下载的原生二进制了。
@@ -132,5 +141,10 @@ bash Web/deploy/reload-nginx.sh              # 重新生成用户子域配置
 - 第三方 API 相关代码不开源（上游策略），同步上游时注意别把新增的私密文件提交上去。
 - PDF 依赖链会引入旧版 `image/time`，包体积敏感时可考虑拆 feature。
 - Web UI / TUI 是两个用户入口，涉及配置/下载流程时建议两边都验。
-- **密钥安全**：`Android/TomatoWeb/release.jks` 与 `dual_sign.py` 中的口令若已提交，
-  公网仓库等于泄露签名密钥，务必评估是否移除（改走私密分发）。
+- **密钥安全（已处理）**：签名 keystore 与口令**不再提交到仓库**。
+  提供方式二选一：
+  1. 环境变量 `TOMATO_KS_FILE` / `TOMATO_KS_PASS` / `TOMATO_KS_ALIAS`
+  2. `Android/TomatoWeb/keystore.properties`（已 gitignore，参考 `keystore.properties.example`）
+
+  未配置时 `assembleRelease` 产出**未签名** APK（CI 只做编译校验时够用）。
+  `dual_sign.py` 同样只从环境变量读取密钥。

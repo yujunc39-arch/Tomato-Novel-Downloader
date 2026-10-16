@@ -1,8 +1,30 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
 }
+
+// ============================================================
+// 签名材料不随仓库分发。
+// 提供方式（二选一）：
+//   1) 环境变量：TOMATO_KS_FILE / TOMATO_KS_PASS / TOMATO_KS_ALIAS
+//   2) 本地文件：Android/TomatoWeb/keystore.properties（已在 .gitignore 中）
+//      storeFile=../release.jks
+//      storePassword=...
+//      keyAlias=...
+//      keyPassword=...
+// 未配置时 release 产物为「未签名」APK（适合 CI 只做编译检查）。
+// ============================================================
+val ksProps = Properties().apply {
+    val f = rootProject.file("keystore.properties")
+    if (f.exists()) f.inputStream().use { load(it) }
+}
+fun ksProp(key: String, env: String): String? = System.getenv(env) ?: ksProps.getProperty(key)
+val ksStorePath: String? = ksProp("storeFile", "TOMATO_KS_FILE")
+val ksFile: java.io.File? = ksStorePath?.let { rootProject.file(it) }
+val hasKeystore: Boolean = ksFile != null && ksFile.exists()
 
 android {
     namespace = "com.tomato.downloader"
@@ -19,18 +41,19 @@ android {
         versionName = "2.1.8"
     }
 
-    // 签名配置：使用「release.jks」自签名证书，对 release 包进行 V1/V2 签名。
-    // 口令来自环境变量或本地 keystore.properties。
+    // 签名配置：V1 + V2 双签名（Android 7- 走 JAR 校验，7+ 走 APK 校验）。
+    // keystore 路径与口令来自环境变量或本地 keystore.properties，不写死在仓库里。
     signingConfigs {
-        create("release") {
-            storeFile = file("../release.jks")
-            storePassword = ksProp("storePassword", "TOMATO_KS_PASS")
-            keyAlias = ksProp("keyAlias", "TOMATO_KS_ALIAS")
-            keyPassword = ksProp("keyPassword", "TOMATO_KS_PASS")
-            // AGP 8.x 已弃用 enableV1Signing/enableV2Signing：改用 v1SigningEnabled/v2SigningEnabled
-            // V1 + V2 双签名：确保 Android 7- (JAR) 与 Android 7+ (APK) 均能安装并做完整性校验
-            isV1SigningEnabled = true
-            isV2SigningEnabled = true
+        if (hasKeystore) {
+            create("release") {
+                storeFile = ksFile
+                storePassword = ksProp("storePassword", "TOMATO_KS_PASS")
+                keyAlias = ksProp("keyAlias", "TOMATO_KS_ALIAS")
+                keyPassword = ksProp("keyPassword", "TOMATO_KS_PASS")
+                // AGP 8.x 已弃用 enableV1Signing/enableV2Signing，改用 isV1SigningEnabled/isV2SigningEnabled
+                isV1SigningEnabled = true
+                isV2SigningEnabled = true
+            }
         }
     }
 
@@ -41,7 +64,7 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            signingConfig = signingConfigs.getByName("release")
+            if (hasKeystore) signingConfig = signingConfigs.getByName("release")
         }
     }
 

@@ -20,17 +20,34 @@ import shutil
 import subprocess
 from pathlib import Path
 
-SRC = Path("/workspace/project_src/TomatoWeb/app/build/outputs/apk/release/app-release.apk")
-KS = Path("/workspace/project_src/TomatoWeb/release.jks")
+# ---- 配置：全部来自环境变量，仓库内不保存任何密钥材料 ----
+#   TOMATO_APK      待签名的 APK（默认 release 产物）
+#   TOMATO_KS_FILE  keystore 路径
+#   TOMATO_KS_PASS  keystore / key 口令
+#   TOMATO_KS_ALIAS key 别名
+#   JAVA_HOME       JDK 路径
+#   BUILD_TOOLS     Android build-tools 路径
+SRC = Path(os.environ.get(
+    "TOMATO_APK",
+    "/workspace/project_src/TomatoWeb/app/build/outputs/apk/release/app-release.apk"))
+KS = Path(os.environ.get("TOMATO_KS_FILE", "/workspace/project_src/TomatoWeb/release.jks"))
 KSPASS = os.environ.get("TOMATO_KS_PASS", "")
 ALIAS = os.environ.get("TOMATO_KS_ALIAS", "release")
-JAVA_HOME = Path("/root/.local/share/mise/installs/java/17.0.2")
+JAVA_HOME = Path(os.environ.get("JAVA_HOME", "/root/.local/share/mise/installs/java/17.0.2"))
 JAVA = JAVA_HOME / "bin/java"
 JARSIGNER = JAVA_HOME / "bin/jarsigner"
 KEYTOOL = JAVA_HOME / "bin/keytool"
-BUILD_TOOLS = Path("/opt/android-sdk/build-tools/37.0.0")
+BUILD_TOOLS = Path(os.environ.get("BUILD_TOOLS", "/opt/android-sdk/build-tools/37.0.0"))
 APKSIGNER_JAR = BUILD_TOOLS / "lib/apksigner.jar"
 ZIPALIGN = BUILD_TOOLS / "zipalign"
+
+if not KSPASS:
+    sys.exit("错误：未设置环境变量 TOMATO_KS_PASS（keystore 口令不随仓库分发）")
+if not KS.exists():
+    sys.exit(f"错误：keystore 不存在：{KS}（用 TOMATO_KS_FILE 指定路径）")
+if not SRC.exists():
+    sys.exit(f"错误：APK 不存在：{SRC}（用 TOMATO_APK 指定路径）")
+
 
 TMPDIR = Path(os.environ.get("TMPDIR", "/tmp")) / "dual_sign"
 TMPDIR.mkdir(parents=True, exist_ok=True)

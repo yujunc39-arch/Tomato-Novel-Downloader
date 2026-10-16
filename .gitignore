@@ -187,3 +187,8 @@ target/
 # Added by cargo
 
 /target
+# ---- 签名密钥与口令（不要提交） ----
+*.jks
+*.keystore
+keystore.properties
+*.pepk

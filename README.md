@@ -111,6 +111,16 @@ cd Android/TomatoWeb
 > 仓库内还提供了 `Android/TomatoWeb/dual_sign.py`，用于手动做 V1 + V2 双签名
 > （先 zipalign，再 apksigner 签 V2，最后追加 JAR 签名，避免破坏 V2 块）。
 
+**签名密钥不进仓库** —— 二选一提供：
+
+```bash
+# A. 环境变量
+export TOMATO_KS_FILE=../release.jks TOMATO_KS_PASS='口令' TOMATO_KS_ALIAS=release
+# B. 本地 keystore.properties（复制 keystore.properties.example 修改，已 gitignore）
+```
+
+未配置时 `assembleRelease` 输出未签名 APK（CI 编译校验够用）。
+
 ### 已下载书籍的存放位置
 
 应用内「已下载书籍」读取的是 Web 服务数据目录下的 `books/`。
