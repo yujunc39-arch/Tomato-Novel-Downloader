@@ -328,10 +328,10 @@ async def register(data: dict, request: Request):
 async def login(data: dict, request: Request):
     username = (data.get("username") or "").strip()
     password = data.get("password") or ""
-    # 真人校验：全员强制，仅超级管理员豁免
-    # （同时作为安全阀：万一 Cloudflare 不可用，超管仍能登入后台处理）
-    _pre = db.get_user_by_name(username) if username else None
-    if not (_pre and _pre.get("is_super")) and not human_ok(request):
+    # 真人校验：全员强制，不做用户名豁免
+    # （否则攻击者可用 403/401 差异探测出哪个账号是超管）
+    # 超管豁免只走「已登录的超管会话」：见 /api/human/status 与 /api/auth_check
+    if not human_ok(request):
         raise HTTPException(403, "请先完成真人校验")
     key = f"{_client_ip(request)}:{username}"
     left = _login_locked(key)

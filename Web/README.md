@@ -209,12 +209,21 @@ nginx -s reload                       # 只改了 nginx / 证书
 **通过后**下发一个 HMAC 签名 cookie（域级 `.DOMAIN`，24 小时有效），
 所以**验证一次，主站和所有子域名都通行**。cookie 无法伪造（签名用 `TOMATO_SECRET` 校验）。
 
-**超管豁免的实现**：
-- `/api/login`：按用户名判断，超级管理员直接放行
+**超管豁免的实现**（只认「已登录的超管会话」，**不认用户名**）：
 - `/api/human/status`：当前会话是超管 → 返回 `required:false`，前端**不弹验证门**
 - `/api/auth_check`：超管访问子域名不校验
+- `POST /api/login`：**不豁免** —— 全员一律先过验证
+  （否则攻击者可用 `403` vs `401` 的差异探测出哪个账号是超管）
 
-> 这也是一道**安全阀**：万一 Cloudflare 在国内不好访问，超管仍能登入后台处理。
+> 代价：超管换个新浏览器时要先过 1 次验证；之后只要保持登录，就不会再看到验证门。
+
+**紧急安全阀**：万一 Cloudflare 在国内不可达，SSH 上服务器把 `.env` 里的
+`TURNSTILE_SITEKEY` / `TURNSTILE_SECRET` 注释掉并重启网关，整站验证即关闭：
+
+```bash
+sed -i 's/^TURNSTILE_/#&/' /opt/tomato-multi/app/.env
+systemctl restart tomato-gateway
+```
 
 **配置**（`.env`）：
 ```ini
