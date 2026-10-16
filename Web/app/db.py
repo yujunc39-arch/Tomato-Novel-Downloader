@@ -1,0 +1,193 @@
+"""数据库层：SQLite，用户与实例管理。启用 WAL + busy_timeout 避免锁问题。"""
+import sqlite3, os, time, threading
+
+DB_PATH = "/opt/tomato-multi/app/data/data.db"
+DATA_ROOT = "/opt/tomato-multi/data/users"
+_lock = threading.Lock()
+
+def _connect():
+    conn = sqlite3.connect(DB_PATH, timeout=30)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=30000")
+    return conn
+
+def get_conn():
+    return _connect()
+
+def init_db():
+    conn = _connect()
+    c = conn.cursor()
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS sessions (
+            sid TEXT PRIMARY KEY,
+            uid INTEGER NOT NULL,
+            pwd_ver INTEGER NOT NULL,
+            created_at INTEGER,
+            expires_at INTEGER
+        )
+    """)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL,
+            subdomain TEXT UNIQUE NOT NULL,
+            port INTEGER UNIQUE NOT NULL,
+            data_dir TEXT NOT NULL,
+            is_admin INTEGER DEFAULT 0,
+            is_super INTEGER DEFAULT 0,
+            pwd_version INTEGER DEFAULT 0,
+            status TEXT DEFAULT 'active',
+            created_at INTEGER,
+            last_active_at INTEGER
+        )
+    """)
+    # 兼容旧库: 补列
+    for col, ddl in [("is_super", "ALTER TABLE users ADD COLUMN is_super INTEGER DEFAULT 0"),
+                     ("pwd_version", "ALTER TABLE users ADD COLUMN pwd_version INTEGER DEFAULT 0")]:
+        try:
+            c.execute(ddl)
+        except sqlite3.OperationalError:
+            pass
+    conn.commit()
+    conn.close()
+
+def next_port():
+    conn = _connect()
+    used = set(r["port"] for r in conn.execute("SELECT port FROM users"))
+    conn.close()
+    p = 19000
+    while p in used:
+        p += 1
+    return p
+
+def next_subdomain():
+    conn = _connect()
+    used = set(r["subdomain"] for r in conn.execute("SELECT subdomain FROM users"))
+    conn.close()
+    n = 1
+    while f"u{n}" in used:
+        n += 1
+    return f"u{n}"
+
+def create_user(username, password_hash, data_dir=None):
+    """创建用户。子域名/端口/数据目录三者确定性绑定：
+       子域名 uN  ->  端口 19000+(N-1)  ->  目录 DATA_ROOT/uN
+    """
+    sub = next_subdomain()
+    port = 19000 + int(sub[1:]) - 1
+    if not data_dir:
+        data_dir = f"{DATA_ROOT}/{sub}"
+    conn = _connect()
+    try:
+        conn.execute(
+            "INSERT INTO users(username,password_hash,subdomain,port,data_dir,status,created_at) "
+            "VALUES(?,?,?,?,?, 'active', ?)",
+            (username, password_hash, sub, port, data_dir, int(time.time())),
+        )
+        conn.commit()
+        row = conn.execute("SELECT id FROM users WHERE username=?", (username,)).fetchone()
+        uid = row["id"]
+    except sqlite3.IntegrityError:
+        conn.close()
+        return None
+    conn.close()
+    return uid
+
+# 便捷更新辅助: 每次独立连接, 自动 commit
+def _exec(sql, params=()):
+    conn = _connect()
+    try:
+        conn.execute(sql, params)
+        conn.commit()
+    finally:
+        conn.close()
+
+def get_user_by_name(username):
+    conn = _connect()
+    r = conn.execute("SELECT * FROM users WHERE username=?", (username,)).fetchone()
+    conn.close()
+    return dict(r) if r else None
+
+def get_user_by_id(uid):
+    conn = _connect()
+    r = conn.execute("SELECT * FROM users WHERE id=?", (uid,)).fetchone()
+    conn.close()
+    return dict(r) if r else None
+
+def list_users():
+    conn = _connect()
+    rows = conn.execute("SELECT * FROM users ORDER BY id").fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+def set_status(uid, status):
+    _exec("UPDATE users SET status=? WHERE id=?", (status, uid))
+
+def set_admin(uid, val):
+    _exec("UPDATE users SET is_admin=? WHERE id=?", (1 if val else 0, uid))
+
+def delete_user(uid):
+    _exec("DELETE FROM users WHERE id=?", (uid,))
+
+def touch(uid):
+    _exec("UPDATE users SET last_active_at=? WHERE id=?", (int(time.time()), uid))
+
+def set_data_dir(uid, data_dir):
+    _exec("UPDATE users SET data_dir=? WHERE id=?", (data_dir, uid))
+
+def set_super(uid, val=1):
+    _exec("UPDATE users SET is_super=? WHERE id=?", (1 if val else 0, uid))
+
+# ---------- 会话管理(token 可吊销) ----------
+import secrets
+
+SESSION_TTL = 60 * 60 * 24 * 30  # 30天
+
+def get_pwd_version(uid):
+    conn = _connect()
+    r = conn.execute("SELECT pwd_version FROM users WHERE id=?", (uid,)).fetchone()
+    conn.close()
+    return (r["pwd_version"] or 0) if r else 0
+
+def create_session(uid, pwd_ver):
+    """签发会话, 返回 sid。token 里带 sid, 只有该 sid 有效才放行。"""
+    sid = secrets.token_hex(16)
+    now = int(time.time())
+    _exec("INSERT INTO sessions(sid,uid,pwd_ver,created_at,expires_at) VALUES(?,?,?,?,?)",
+          (sid, uid, pwd_ver, now, now + SESSION_TTL))
+    # 顺带清理过期会话
+    _exec("DELETE FROM sessions WHERE expires_at<?", (now,))
+    return sid
+
+def session_valid(sid, uid, pwd_ver):
+    """会话存在且未过期且与密码版本一致才有效。"""
+    if not sid:
+        return False
+    conn = _connect()
+    r = conn.execute("SELECT uid,pwd_ver,expires_at FROM sessions WHERE sid=?", (sid,)).fetchone()
+    conn.close()
+    if not r:
+        return False
+    if r["expires_at"] < int(time.time()):
+        return False
+    if r["uid"] != uid:
+        return False
+    if r["pwd_ver"] != pwd_ver:
+        return False
+    return True
+
+def delete_session(sid):
+    _exec("DELETE FROM sessions WHERE sid=?", (sid,))
+
+def delete_user_sessions(uid):
+    """让用户所有会话失效(改密码/封禁时调用)。"""
+    _exec("DELETE FROM sessions WHERE uid=?", (uid,))
+
+def bump_pwd_version(uid):
+    """改密码时自增版本号, 使该用户所有旧 token/session 失效。"""
+    _exec("UPDATE users SET pwd_version = COALESCE(pwd_version,0)+1 WHERE id=?", (uid,))
+
+def update_password(uid, password_hash):
+    _exec("UPDATE users SET password_hash=? WHERE id=?", (password_hash, uid))

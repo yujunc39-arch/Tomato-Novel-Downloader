@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>管理员登录</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;background:linear-gradient(135deg,#fdf2e9,#fff4e6);min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;color:#3d2b1f}
+.box{background:#fff;border-radius:16px;padding:30px 26px;width:100%;max-width:380px;box-shadow:0 8px 30px rgba(230,120,30,.14)}
+.logo{text-align:center;margin-bottom:22px}
+.logo .icon{font-size:44px}
+.logo h1{font-size:20px;color:#e8590c;margin-top:8px}
+.logo p{font-size:13px;color:#8a6d54;margin-top:6px}
+.input{width:100%;padding:12px 14px;border:1.5px solid #eee;border-radius:10px;font-size:15px;margin-bottom:14px;outline:none;transition:.2s;background:#fff}
+.input:focus{border-color:#e8590c}
+.btn{width:100%;padding:13px;background:#e8590c;color:#fff;border:none;border-radius:10px;font-size:16px;font-weight:600;cursor:pointer;transition:.2s}
+.btn:hover{background:#d9480f}
+.btn:active{transform:scale(.99)}
+.msg{text-align:center;margin-top:12px;font-size:14px;min-height:20px}
+.msg.err{color:#e03131}
+.msg.ok{color:#2f9e44}
+</style>
+</head>
+<body>
+<div class="box">
+  <div class="logo">
+    <div class="icon">🍅</div>
+    <h1>管理员登录</h1>
+    <p>番茄下载器 · 管理后台</p>
+  </div>
+  <input class="input" id="u" placeholder="管理员用户名" autocomplete="username">
+  <input class="input" id="p" type="password" placeholder="密码" autocomplete="current-password">
+  <button class="btn" onclick="doLogin()">登 录</button>
+  <div class="msg" id="m"></div>
+</div>
+<script>
+async function doLogin(){
+  const u=document.getElementById('u').value.trim(), p=document.getElementById('p').value;
+  const m=document.getElementById('m');
+  if(!u||!p){m.className='msg err';m.textContent='请输入用户名和密码';return;}
+  m.className='msg';m.textContent='登录中…';
+  try{
+    const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({username:u,password:p})});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok){m.className='msg err';m.textContent=d.detail||'用户名或密码错误';return;}
+    if(!d.is_admin){m.className='msg err';m.textContent='该账号不是管理员，无权访问';return;}
+    localStorage.setItem('token',d.token);
+    m.className='msg ok';m.textContent='登录成功，正在进入…';
+    location.href='/linjiuser';
+  }catch(e){m.className='msg err';m.textContent='网络错误，请重试';}
+}
+['u','p'].forEach(id=>document.getElementById(id).addEventListener('keydown',e=>{if(e.key==='Enter')doLogin();}));
+</script>
+</body>
+</html>

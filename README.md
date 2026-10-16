@@ -1,333 +1,227 @@
-# 番茄小说下载器~~精简版~~
+# Tomato-Novel-Downloader · Android / Web 增强分支
 
-> 小小推广位：[RustEpubReader](https://github.com/zhongbai2333/RustEpubReader) <- 自研Epub阅读器，轻量快速  声明：阅读器项目不会添加下载器功能
-
-> 小小推广位：[ShuaForge](https://github.com/zhongbai2333/ShuaForge) <- 自研刷题助手，使用AI帮助你实现高效复习，大学生一周内快速补充知识，允许从学习通等平台导入题库
-
-番茄小说下载器*不精简*版本，由于项目[fanqienovel-downloader](https://github.com/ying-ck/fanqienovel-downloader)一直不更新，于是我根据Dimily的项目Fork并重构
-
-目前完全使用`Rust`重写了整个项目，与原Fork项目几乎没有关系了（~~虽说原本的Python版本也没几行是原项目的了~~）
-
-我对其进行重构 + 优化，添加更多功能，包括：EPUB 下载支持、更好的断点续传、更好的错误管理、书本搜索、Web UI 等特性。
-
-本项目支持两种构建模式：
-
-- 默认模式（`official-api`）：保留 Official-API 能力（搜索/目录/段评等），同时也兼容第三方正文模式。
-- No-Official-API 模式（`no-official-api`）：**不依赖 Official-API crate**；目录/书信息走网页解析；**正文强制使用第三方 API 地址池**。
-
-为了保证第三方API安全，部分第三方接口相关代码并不开源，包括地址和token，敬请谅解，谢谢！
-
-为方便视障人士使用，我保留了老的CLI界面，接下来是启用方法：
-
-在第一次打开程序时 按三下 `o` 并回车 或者 按一下下方向键并按三下 `o` 都可以启用老版本CLI界面
-
-注意：切换成功应该会发出 `灯` 的一声
+> 本仓库是 [zhongbai2333/Tomato-Novel-Downloader](https://github.com/zhongbai2333/Tomato-Novel-Downloader) 的个人 **Fork**。
+> 在上游 Rust 下载器的基础上，新增了两块自研内容：
+>
+> - 📱 **Android 客户端**（`Android/`）—— 把下载器的 Web UI 变成一个开箱即用的安卓 App
+> - 🌐 **多租户 Web 平台**（`Web/`）—— 一台服务器托管多个用户，每人独立子域名 + 独立实例
+>
+> 上游的 Rust 核心（TUI / Web UI / CLI / 构建选项）保持原样，并持续跟随上游更新。
 
 ---
 
-## 我该如何使用？
+## 目录结构
 
-根据自己的系统版本在[Releases](https://github.com/zhongbai2333/Tomato-Novel-Downloader/releases)列表下载可执行文件，并运行
-首次下载新书请优先使用 TUI 或 Web UI；CLI 仅保留更新本地已有小说的能力
-
-### 命令行模式（非交互）
-
-如果你需要在自动化脚本中使用下载器（例如为 Kindle 自动更新番茄小说），可以使用命令行参数更新**本地已经下载过**的书籍：
-
-- 更新指定书籍：
-
-    ```sh
-    Tomato-Novel-Downloader.exe --update <book_id>
-    ```
-
-    示例：
-
-    ```sh
-    Tomato-Novel-Downloader.exe --update 7318247498772674083
-    ```
-
-注意：
-
-- 命令行模式为非交互模式，会直接开始更新，无需手动输入
-- 使用配置文件（`config.yml`）中的默认保存路径和下载设置
-- **CLI 已禁用 `--download` 新建下载能力**，以降低脚本批量滥用风险
-- `--update` 只允许更新默认保存目录下**已经存在本地下载记录**的书籍
-- 如果书籍不存在本地记录，CLI 会拒绝执行，并提示改用 Web UI / TUI 完成首次下载
-- 只接受 book_id，不支持搜索功能
-
-### 老版 CLI（无 UI）说明
-
-- 老版 CLI 现已**禁用新建下载/搜索下载**
-- 仅保留以下能力：更新本地已有小说、查看下载历史、修改配置、检查程序更新
-- 如果需要首次下载新书，请使用默认 TUI 或 Web UI（`--server`）
-
-### Web UI 服务器模式（--server）
-
-如果你希望在局域网用浏览器操作（搜索、发起下载、查看任务、下载文件/打包下载文件夹），可以启用 Web UI：
-
-- 启动 Web UI：
-
-    ```sh
-    Tomato-Novel-Downloader.exe --server
-    ```
-
-- 监听地址（默认 `127.0.0.1:18423`）：
-
-    通过环境变量修改监听地址，例如局域网访问：
-
-    ```sh
-    TOMATO_WEB_ADDR=0.0.0.0:18423
-    ```
-
-    IPv6 监听示例（注意 IPv6 需要方括号）：
-
-    ```sh
-    TOMATO_WEB_ADDR=[::]:18423
-    ```
-
-    同时监听多个地址（用逗号或分号分隔），例如同时监听 IPv4 + IPv6：
-
-    ```sh
-    TOMATO_WEB_ADDR=0.0.0.0:18423,[::]:18423
-    ```
-
-- 密码锁模式（防止陌生人使用）：
-
-    ```sh
-    Tomato-Novel-Downloader.exe --server --password 你的密码
-    ```
-
-    或者使用环境变量：
-
-    ```sh
-    TOMATO_WEB_PASSWORD=你的密码
-    ```
-
-- 数据目录（用于 Docker 部署或集中管理配置/日志）：
-
-    通过 `--data-dir` 参数指定数据目录，程序会将 `config.yml` 和 `logs` 文件夹放在该目录下：
-
-    ```sh
-    Tomato-Novel-Downloader.exe --server --data-dir /data
-    ```
-
-    Docker 使用示例：
-
-    ```sh
-    docker run -v /host/data:/data my-tomato-image --server --data-dir /data
-    ```
-
-    这样可以方便地挂载数据目录，实现配置和日志的持久化。
-
-Web UI 提供的功能（纯 HTML，无需额外前端构建）：
-
-- 搜索书籍并创建下载任务
-- 任务列表/进度刷新/取消任务
-- 下载库按目录浏览（不再把所有文件递归平铺）
-- 文件直接下载
-- 文件夹一键打包为 zip 下载（保持目录结构，适配音频等“文件夹内包含文件夹”的情况）
-- 配置页面：可在线修改部分下载输出相关配置（会写回 `config.yml`）
-
-注意：Web UI 主要面向自建/局域网使用；如果要暴露到公网，建议放在反向代理/HTTPS 后面，并务必开启密码锁。
-
----
-
-## Docker 镜像
-
-已提供 Web UI 版本的 Docker 镜像：
-
-- 镜像地址：[DockerHub](https://hub.docker.com/r/zhongbai233/tomato-novel-downloader-webui)
-- Tags 说明：
-  - `latest`：默认 **glibc** 版本（常规服务器/桌面环境）
-  - `latest-musl`：**musl** 版本，适用于 **软路由 / NAS** 等轻量系统
-
-示例（映射端口与持久化数据目录，使用 glibc 版本）：
-
-```sh
-docker run -d \
-    --name tomato-novel-webui \
-    -p 18423:18423 \
-    -v /host/data:/data \
-    -e TOMATO_WEB_ADDR=0.0.0.0:18423 \
-    -e TOMATO_WEB_PASSWORD=你的密码 \
-    zhongbai233/tomato-novel-downloader-webui:latest --server --data-dir /data
+```
+.
+├── Android/                  # 📱 安卓客户端（Kotlin + Jetpack Compose）
+│   ├── TomatoWeb/            #    应用源码（App 名：Web For Tomato）
+│   ├── android-env.sh        #    构建环境变量
+│   └── gradle-init.gradle    #    阿里云镜像加速（国内构建用）
+│
+├── Web/                      # 🌐 多租户 Web 平台（FastAPI + nginx）
+│   ├── app/                  #    网关后端 + 前端页面
+│   │   ├── main.py           #      FastAPI 网关（注册/登录/管理后台 API）
+│   │   ├── db.py             #      SQLite 数据层
+│   │   ├── instances.py      #      用户实例管理（启动/探活/回收/nginx 刷新）
+│   │   ├── static/           #      主站页面
+│   │   └── adminstatic/      #      管理后台页面
+│   ├── deploy/               #    systemd / nginx 配置
+│   ├── install.sh            #    一键部署脚本
+│   ├── .env.example          #    配置模板
+│   └── README.md             #    平台详细文档
+│
+├── src/                      # 🦀 上游 Rust 源码（跟随上游，请勿在此改业务）
+├── Cargo.toml                #    上游构建配置
+├── installer.sh              #    上游 Termux / Linux 安装脚本
+└── README.md
 ```
 
-如果你使用软路由或 NAS 系统，请使用 musl 版本：
+---
 
-```sh
-docker run -d \
-    --name tomato-novel-webui \
-    -p 18423:18423 \
-    -v /host/data:/data \
-    -e TOMATO_WEB_ADDR=0.0.0.0:18423 \
-    -e TOMATO_WEB_PASSWORD=你的密码 \
-    zhongbai233/tomato-novel-downloader-webui:latest-musl --server --data-dir /data
-```
+## 与上游的关系
 
-可通过 `TOMATO_WEB_ADDR`、`TOMATO_WEB_PASSWORD` 与 `--data-dir` 控制监听地址、密码与数据目录（见上文 Web UI 说明）。
+| 内容 | 来源 | 说明 |
+|------|------|------|
+| `src/` `Cargo.*` `scripts/` `.github/workflows/` | **上游** | 原样保留，定期 `merge upstream/main` 同步 |
+| `Android/` | **本 Fork 自研** | 安卓壳 + Web 服务二进制管理 |
+| `Web/` | **本 Fork 自研** | 多租户平台，服务端托管 |
+| 文档（`README.md` 等） | **本 Fork 重写** | 描述本 Fork 的完整结构 |
+
+> 上游项目的原始说明（下载器本身的用法、Docker 镜像、`--server` / `--update` 参数、
+> Edge TTS 有声书、CLI/TUI 说明等）依然适用，因为 `src/` 未做修改。
+> 需要查上游细节时，请直接看 [上游仓库](https://github.com/zhongbai2333/Tomato-Novel-Downloader)。
 
 ---
 
-## 构建模式（Cargo Features）
+## 一、Android 客户端：Web For Tomato
 
-本项目提供两个互斥的 feature：`official-api` 与 `no-official-api`（两者不能同时启用）。
+### 它是什么
 
-### 默认模式：official-api（默认启用）
+一个「把下载器装进手机」的安卓应用。点击 **「获取 Web」** 后，它会：
 
-- 构建（默认就会启用）：
+1. 从上游 Release（或自定义地址）下载与设备架构匹配的 Web 服务二进制
+2. 放进应用私有目录并赋予可执行权限（自动绕过 Android 10+ 的 `noexec` 限制）
+3. 以 `--server` 模式启动
+4. 在本机（`http://127.0.0.1:18423`）与局域网（`http://<手机IP>:18423`）暴露下载器的 Web UI
 
-```sh
-cargo build --release
+之后用手机浏览器或同局域网的电脑浏览器打开即可搜索、下载、管理书籍。
+
+### 主要功能
+
+- 📥 **一键获取 / 更新 Web 二进制**，自动识别 CPU 架构；支持加载**自定义二进制**
+- 🖥 **访问地址展示**：本机地址 + 局域网地址，一键复制，附带二维码
+- 🔌 **端口自定义**：默认 `18423`，范围 1024–65535，重启服务生效
+- 📚 **书库管理**：扫描已下载书籍、预览、复制到任意目录、删除
+- ⚙️ **前台常驻服务**（`WebServerService`），锁屏 / 切后台不中断，通知栏常驻
+- 🛡️ **执行目录探测**：Android 10+ `filesDir` 被挂载为 `noexec`，应用会自动寻找可执行目录（并真实探测而非只看权限位）
+- ℹ️ 关于页：版本、作者、参考项目跳转
+
+### 技术栈
+
+| 项 | 值 |
+|----|-----|
+| 包名 | `com.tomato.downloader` |
+| 应用名 | Web For Tomato |
+| 版本 | 2.1.8 (`versionCode 7795`) |
+| minSdk / targetSdk / compileSdk | **23 / 28 / 35** |
+| 语言 & UI | Kotlin + Jetpack Compose (Material 3) |
+| 架构 | Navigation Compose + `StateFlow` |
+
+> ⚠️ **`targetSdk = 28` 是刻意为之**：Android 10 (API 29) 起 `filesDir` 被施加 W^X（`noexec`）保护，
+> 即使 `chmod +x` 也无法执行下载下来的原生二进制。降到 28 可获得该豁免。
+> Termux 之所以能跑，是因为它把二进制放在自己的 `$PREFIX` 目录。
+
+### 构建
+
+```bash
+source Android/android-env.sh        # 配置 JAVA_HOME / ANDROID_HOME
+cd Android/TomatoWeb
+./gradlew assembleRelease            # 或 assembleDebug
 ```
 
-- 行为：
-  - 搜索功能可用（TUI / Web UI / 老 CLI 的搜索入口）。
-  - 段评（EPUB 段评页/资源抓取）可用（取决于配置项）。
-  - 正文获取可通过配置在“官方/第三方”之间切换（`use_official_api`）。
+国内网络建议加 init script 走阿里云镜像：
 
-### No-Official-API 模式：no-official-api（Issue #187）
-
-- 构建：
-
-```sh
-# Linux/macOS
-cp Cargo_no_official.toml Cargo.toml
-cargo build --release
-
-# Windows
-copy /Y Cargo_no_official.toml Cargo.toml
-cargo build --release
+```bash
+./gradlew --init-script ../gradle-init.gradle assembleRelease
 ```
 
-仓库根目录提供了 `Cargo_no_official.toml`，该文件**完全不引用** `tomato-novel-official-api` 路径依赖，适合无法获取该 crate 的用户直接使用。
+产物：`Android/TomatoWeb/app/build/outputs/apk/release/app-release.apk`
 
-- 行为差异（重点）：
-  - **不依赖** `tomato-novel-official-api` crate，可在缺少 Official-API 环境时编译。
-  - 目录与书本信息：使用网页解析（`FanqieWebNetwork`）。
-  - **正文获取：强制第三方模式**（忽略/不使用 `use_official_api=true` 的官方分支）。
-  - 搜索功能：不可用（会返回提示/报错）。
-  - 段评：不可用（会被强制关闭）。
+> 仓库内还提供了 `Android/TomatoWeb/dual_sign.py`，用于手动做 V1 + V2 双签名
+> （先 zipalign，再 apksigner 签 V2，最后追加 JAR 签名，避免破坏 V2 块）。
+
+### 已下载书籍的存放位置
+
+应用内「已下载书籍」读取的是 Web 服务数据目录下的 `books/`。
+在 Web UI 里下载完成的书籍会出现在这里，可直接预览 / 复制 / 删除。
 
 ---
 
-## Edge TTS 有声小说生成
+## 二、多租户 Web 平台
 
-从当前版本开始，程序内置了 [msedge-tts](https://github.com/hs-cn/msedge-tts) 语音合成功能，可在下载文本后自动生成对应的有声小说：
+### 它是什么
 
-- 在配置菜单（新 UI 或老 CLI 均可）中启用 `是否生成有声小说`，即可在每次下载完成后生成音频文件。
-- 默认发音人是 `zh-CN-XiaoxiaoNeural`，可以通过配置项自定义语速、音量、音调以及输出格式（`mp3` 或 `wav`）。音调值当前支持 Hz 写法，例如 `+2Hz`、`-10Hz`；若留空或填写 0 将忽略音调调整。
-- 可在“有声小说并发数”中调整 Edge TTS 并发任务数量（默认 24），生成时会显示进度条；请根据网络状况和机器性能选择适当的并发度。
-- 音频会存放在输出目录下的 `{书名}_audio` 文件夹中，并按章节顺序命名，例如 `0001-第一章.mp3`；若已下载到书籍封面，还会在该目录生成 `cover.jpg` 供 Voice 等播放器识别封面。
-- 重复运行或断点续跑时，已存在且非空的章节音频会自动跳过，仅补生成缺失章节。
-- msedge-tts 需要联网调用微软的在线服务，请确保运行环境可正常访问外网。
+把「一个人跑一个下载器」升级为「一台服务器服务一群人」的网站系统：
 
-如遇到生成失败，可在日志中查看详细错误信息。
+```
+用户浏览器 ──HTTPS──> nginx ──┬──> 主站网关 (FastAPI :18080)
+                              │      ├─ 注册 / 登录 / 我的空间
+                              │      ├─ 管理后台 (/linjiuser)
+                              │      └─ 为每个用户懒启动独立番茄进程
+                              │
+                              └──> u<N>.<域名> ──> 该用户的番茄实例 (127.0.0.1:19000+)
+                                                   (nginx 反代 + auth_request 鉴权)
+```
+
+每个注册用户自动获得：
+- 一个专属子域名 `u<N>.<域名>`
+- 一个专属端口 `19000 + (N-1)`
+- 一个专属数据目录 `/opt/tomato-multi/data/users/u<N>`
+
+### 核心功能
+
+**面向用户**
+- 自助注册 / 登录，自动分配子域名与实例
+- 一键启动个人下载空间（下载器的 Web UI），启动后即可搜索 / 下载 / 管理书籍
+- 修改自己的密码（改后所有旧会话立即失效）
+- 忘记密码 → 联系管理员重置（无邮箱体系，bcrypt 不可逆）
+
+**面向管理员**
+- 用户管理：搜索 / 多维筛选（封禁状态、管理身份、实例状态）、封禁 / 解封 / 删除
+- 实例管理：开 / 关单个实例、**一键关闭所有**、查看运行状态与启动时间
+- 用户空间：浏览 / 下载（文件夹自动打包 zip）/ 删除 / **在线编辑 `config.yml`（带语法校验 + 自动备份）**
+- 权限分级：👑 超级管理员 / 🛡 普通管理员 / 👤 普通用户
+- 📢 全站弹窗公告（nginx `sub_filter` 注入，主站 + 所有用户子域生效）
+- 📦 软件下载统计（次数 + IP 聚合）
+- 🔄 番茄版本管理（一键从 GitHub 拉最新二进制并替换，带 `.bak` 备份）
+- 🧾 审计日志（时间 / 来源 IP / 操作人 / 动作 / 详情）
+
+**自动化**
+- 实例**空闲 20 分钟**自动回收，并清空该用户的 `books/` 与 `logs/`
+- 关闭实例 / 封禁 / 删除用户时自动清理数据
+- 网关启动时清理遗留的孤儿实例，保证与数据库一致
+
+**安全**
+- 全局默认拒绝中间件：除白名单外所有 `/api/*` 强制登录
+- SQL 全参数化、密码 bcrypt、JWT + `sessions` 表会话吊销
+- 登录限流（同 IP+账号 5 次失败锁 5 分钟）、注册限流（每 IP 每小时 10 个）
+- nginx 层子域名鉴权（`auth_request`）：未登录 / 越权自动 `302` 弹回主站
+- IP 直连 / 未知域名（Host 不匹配）一律 `444` 掐断
+- 关闭 `/docs`、`/redoc`、`/openapi.json`，隐藏接口结构
+
+### 一键部署
+
+```bash
+cd Web
+cp .env.example .env       # 填写 TOMATO_DOMAIN（和可选的 TOMATO_SECRET）
+sudo bash install.sh
+```
+
+`install.sh` 会自动完成：安装依赖 → 部署代码 → 建 venv → 初始化数据库与管理员
+→ 配置 systemd → 配置 nginx → 申请 Let's Encrypt 证书 → 启动服务。
+
+详细说明见 **[Web/README.md](Web/README.md)**。
 
 ---
 
-## 常见问题
+## 三、同步上游
 
-1. 之前就已经有了一个下载器，为什么还要再做一个？
+本 Fork 只在上游基础上**新增**目录，理论上永远可以无冲突合并：
 
-    ~~本程序的初衷就是极致简化番茄小说下载器的代码，使程序更加易于操作与运行，并且更加稳定和快速！~~
-    本程序由于重构导致文件体积较大，无法做到原项目的简易，但是此项目胜在傻瓜式操作，无需多余配置，立即使用
+```bash
+git clone https://github.com/yujunc39-arch/Tomato-Novel-Downloader.git
+cd Tomato-Novel-Downloader
+git remote add upstream https://github.com/zhongbai2333/Tomato-Novel-Downloader.git
+git fetch upstream
+git merge upstream/main          # 无冲突（本地改动只在 Android/ 与 Web/）
+git push origin main
+```
 
-2. 手机端可以正常运行吗？
+> 若未来双方同时改动了同一文件（例如上游也新增了 `Android/`），才需要手动解冲突。
+> 因此**不要把业务代码写进上游目录**，避免 merge 冲突。
 
-    **仅限安卓设备（Termux）**可以运行。
-    但由于 **TUI/CLI 界面对小屏幕不太友好**，手机端更推荐使用 **Web UI 模式（--server）**：在 Termux 里启动服务，然后用手机浏览器操作（或让同一局域网的其它设备访问）。
-
-    Release 里提供 Android arm64 构建产物：`TomatoNovelDownloader-Android_arm64-[当前版本号]`，可直接在 Termux 中运行。
-
-    另外：如果你希望在 TUI 中使用 `Ctrl+V` 从系统剪贴板粘贴，需要安装 Termux API：
-
-    - 安装 App：Termux:API
-    - 安装命令：`pkg install termux-api`
-    - 验证：`termux-clipboard-get` 可正常输出内容
-
-    为了防止有些零基础的小白下载到了此程序，我们为您准备了一些教程：
-
-    下载termux(链接:(<https://github.com/termux/termux-app/releases>) 并安装，然后运行部署脚本：
-
-    ```sh
-    bash <(curl -sL https://raw.githubusercontent.com/zhongbai2333/Tomato-Novel-Downloader/main/installer.sh)
-    ```
-
-    国内用户可使用：
-
-    ```sh
-    bash <(curl -sL https://dl.zhongbai233.com/installer.sh)
-    ```
-
-    安装完成后，推荐用 Web UI 启动（示例）：
-
-    ```sh
-    TOMATO_WEB_ADDR=0.0.0.0:18423 TOMATO_WEB_PASSWORD=你的密码 tomato-novel-downloader --server
-    ```
-
-    然后在浏览器打开：
-
-    - 本机：`http://127.0.0.1:18423/`
-    - 局域网其它设备：`http://<手机的局域网IP>:18423/`
-
-3. 电脑端该如何运行？
-
-    `Windows` 双击运行`TomatoNovelDownloader-Win64-[当前版本号].exe`
-
-    `Linux` 和 `MacOS` 使用终端运行，可以使用一键部署脚本：
-
-    ```sh
-    bash <(curl -sL https://raw.githubusercontent.com/zhongbai2333/Tomato-Novel-Downloader/main/installer.sh)
-    ```
-
-    国内用户可使用：
-
-    ```sh
-    bash <(curl -sL https://dl.zhongbai233.com/installer.sh)
-    ```
-
-4. 小说id是什么？在哪里获取？
-
-    推荐两种方式：
-
-    - 直接使用 Web UI 的“搜索书籍”，不需要手动找 ID。
-    - 如果你已经有分享链接/书籍信息，通常会包含一段很长的数字（Book ID）。复制该数字即可。
-
-5. 我是纯小白，程序在哪里下载啊
-
-    直接点击此链接(<https://github.com/zhongbai2333/Tomato-Novel-Downloader/releases>)先找到最新版本，然后在最新版本中找到”Assets”并点击来展开内容(如果已展开就不必进行此操作)。在展开的内容中找到对应程序，点击下载即可
-
-## 注意事项（必看）
-
-由于使用的是api，所以未来不知道有哪一天突然失效，如果真的出现了，请立即在“Issues”页面中回复！
-
-如果您在使用本程序的时候出现了下载章节失败的情况，也许并不是api失效了，可能是因为调用api人数过多，导致api暂时关闭，如果遇到了这种情况，请稍后再试，另外，您需要下载的小说api可能会因没有更新所以下载失败。
-
-千万不要想着耍小聪明：“欸，我改一下线程数不就能快速下载了吗？”请打消这种念头！因为这样会加大服务器压力！！！
-
-另外，在使用本程序时，请不要使用任何vpn或网络代理等一切影响网络正常使用的程序！
-
-如果您也没有遇到以上的这种情况，请检查要下载的小说章节数量有多少，不建议大于1500章！(保守估计)
-
->划重点：切记！不能将此程序用于违法用途，例如将下载到的小说进行转载、给不良人员分享此程序使用等。本开发者严禁不支持这样做！！！并且请不要将api进行转载使用，除非您已经与开发者协商过，否则后果自负！下载到的小说仅供自行阅读，看完之后请立即删除文件，以免造成侵权，如果您还是偷尝禁果，需自行承担由此引发的任何法律责任和风险。程序的作者及项目贡献者不对因使用本程序所造成的任何损失、损害或法律后果负责！
+---
 
 ## 免责声明
 
-  本程序仅供 Rust 网络爬虫技术、网页数据处理及相关研究的学习用途。请勿将其用于任何违反法律法规或侵犯他人权益的活动。
-  
-  使用本程序的用户需自行承担由此引发的任何法律责任和风险。程序的作者及项目贡献者不对因使用本程序所造成的任何损失、损害或法律后果负责。
-  
-  在使用本程序之前，请确保您遵守适用的法律法规以及目标网站的使用政策。如有任何疑问或顾虑，请咨询专业法律顾问。
+- 本程序仅供 **Rust 网络爬虫技术、网页数据处理及相关研究** 的学习用途。
+- 请勿用于任何违反法律法规或侵犯他人权益的活动；下载到的小说仅供自行阅读。
+- 请勿将第三方 API 转载使用，也请勿把本程序用于批量滥用。
+- 使用本程序的用户需自行承担由此引发的任何法律责任和风险。程序作者及贡献者不对
+  因使用本程序所造成的任何损失、损害或法律后果负责。
 
-## 感谢
+---
 
-感谢用户选择此程序，如果喜欢可以加star，如果有什么对本程序的建议，请在“Issues”页面提出。您的喜欢就是我更新的最大动力❤️
+## 致谢
 
-项目前期 · 感谢原作者Dimily的基础项目
+- 上游项目：[zhongbai2333/Tomato-Novel-Downloader](https://github.com/zhongbai2333/Tomato-Novel-Downloader)（Rust 下载器核心）
+- 上游作者：[zhongbai2333](https://github.com/zhongbai2333) 及所有贡献者
+- 前期基础项目：Dimily
+- API 支持：[@helloplhm-qwq](https://github.com/helloplhm-qwq)、QQ 用户 @终忆、[@jingluopro](https://github.com/jingluopro)
 
-项目前期 · 感谢来自Github用户@helloplhm-qwq的api！
+---
 
-项目前期 · 感谢来自QQ用户@终忆的api！
+## License
 
-项目前期 · 感谢来自Github用户@jingluopro的api！！
+[MIT](LICENSE) · 上游版权归 zhongbai2333 所有，本 Fork 的新增部分同样以 MIT 发布。

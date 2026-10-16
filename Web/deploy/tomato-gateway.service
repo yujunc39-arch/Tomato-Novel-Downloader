@@ -1,0 +1,17 @@
+[Unit]
+Description=Tomato Multi-Tenant Gateway
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/tomato-multi/app
+EnvironmentFile=/opt/tomato-multi/app/.env
+ExecStart=/opt/tomato-multi/venv/bin/uvicorn main:app --host 127.0.0.1 --port 18080
+Restart=always
+RestartSec=3
+KillMode=process
+StandardOutput=append:/opt/tomato-multi/app/run.log
+StandardError=append:/opt/tomato-multi/app/run.log
+
+[Install]
+WantedBy=multi-user.target
