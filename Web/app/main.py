@@ -7,7 +7,7 @@
 每个用户注册后获得独立 port + data_dir，由 instances 模块懒启动番茄进程。
 用户通过其专属子域名 u<id>.<domain> 访问番茄 Web UI(nginx反代到用户端口)。
 """
-import os, json, time, threading, shutil, hashlib, tempfile, zipfile, re, subprocess
+import os, json, time, threading, shutil, hashlib, hmac, tempfile, zipfile, re, subprocess
 import bcrypt, jwt
 from fastapi import FastAPI, Request, HTTPException, Header, Depends
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, FileResponse
@@ -37,6 +37,14 @@ COOKIE_DOMAIN = "." + DOMAIN
 BASE_DATA = "/opt/tomato-multi/data/users"
 JWT_TTL = 60 * 60 * 24 * 30  # 30天
 
+# ---- Cloudflare Turnstile 真人校验（未配置 SITEKEY 则整个功能自动关闭）----
+TURNSTILE_SITEKEY = (os.environ.get("TURNSTILE_SITEKEY") or _ENV.get("TURNSTILE_SITEKEY") or "").strip()
+TURNSTILE_SECRET  = (os.environ.get("TURNSTILE_SECRET")  or _ENV.get("TURNSTILE_SECRET")  or "").strip()
+HUMAN_COOKIE = "human"
+HUMAN_TTL = 24 * 3600        # 通过校验后 24 小时内免重复验证
+if TURNSTILE_SITEKEY and not TURNSTILE_SECRET:
+    print("warn: TURNSTILE_SITEKEY 已配置但缺少 TURNSTILE_SECRET，真人校验将不可用")
+
 # 用户名: 2-20位, 字母/数字/下划线/中文/点/横线
 USERNAME_RE = re.compile(r"^[A-Za-z0-9_\u4e00-\u9fa5.\-]{2,20}$")
 
@@ -56,7 +64,7 @@ app.mount("/static", StaticFiles(directory="/opt/tomato-multi/app/static"), name
 
 # ---- 允许匿名访问的接口白名单(其余 /api/* 一律要求登录) ----
 PUBLIC_API = {"/api/register", "/api/login", "/api/logout", "/api/auth_check",
-              "/api/download/app"}
+              "/api/download/app", "/api/human/status", "/api/human/verify"}
 
 def bj_now():
     """北京时间(UTC+8)。服务器运行在 UTC, 这里加 8 小时。"""
@@ -199,9 +207,95 @@ def resolve_data_dir(uid):
         return os.path.join(BASE_DATA, u["subdomain"])
     return os.path.join(BASE_DATA, f"u{uid}")
 
+# ---------- Cloudflare Turnstile 真人校验 ----------
+def _human_sig(exp: int) -> str:
+    """用站点密钥给过期时间签名，防止伪造 cookie 绕过。"""
+    return hmac.new(SECRET.encode(), str(exp).encode(), hashlib.sha256).hexdigest()
+
+def make_human_cookie() -> str:
+    exp = int(time.time()) + HUMAN_TTL
+    return f"{exp}.{_human_sig(exp)}"
+
+def human_ok(request: Request) -> bool:
+    """检查当前请求是否已通过真人校验（签名有效且未过期）。"""
+    if not TURNSTILE_SITEKEY:
+        return True                      # 未启用真人校验，直接放行
+    v = request.cookies.get(HUMAN_COOKIE)
+    if not v or "." not in v:
+        return False
+    exp_s, sig = v.split(".", 1)
+    if not exp_s.isdigit():
+        return False
+    exp = int(exp_s)
+    if exp < time.time():
+        return False
+    return hmac.compare_digest(sig, _human_sig(exp))
+
+def is_super_session(request: Request) -> bool:
+    """当前请求是否携带有效的超级管理员会话（用于豁免真人校验）。"""
+    try:
+        u = _cookie_user(request)
+    except Exception:
+        return False
+    return bool(u and u.get("is_super"))
+
+def need_human(request: Request) -> bool:
+    """该请求是否必须通过真人校验（超管豁免；已通过则 False）。"""
+    if not (TURNSTILE_SITEKEY and TURNSTILE_SECRET):
+        return False
+    if is_super_session(request):
+        return False                     # 👑 超级管理员无需验证
+    return not human_ok(request)
+
+def turnstile_verify(token: str, ip: str) -> bool:
+    """向 Cloudflare 校验 Turnstile token。"""
+    if not TURNSTILE_SECRET:
+        return False
+    import urllib.request, urllib.parse
+    payload = urllib.parse.urlencode({
+        "secret": TURNSTILE_SECRET, "response": token, "remoteip": ip,
+    }).encode()
+    try:
+        req = urllib.request.Request(
+            "https://challenges.cloudflare.com/turnstile/v0/siteverify",
+            data=payload, method="POST")
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            j = json.loads(resp.read().decode())
+        return bool(j.get("success"))
+    except Exception as e:
+        print("turnstile verify error:", e)
+        return False
+
+@app.get("/api/human/status")
+async def human_status(request: Request):
+    """前端用来判断是否需要弹出真人校验（超管豁免）。"""
+    super_user = is_super_session(request)
+    return {"required": bool(TURNSTILE_SITEKEY and TURNSTILE_SECRET) and not super_user,
+            "ok": super_user or human_ok(request),
+            "super": super_user,
+            "sitekey": TURNSTILE_SITEKEY}
+
+@app.post("/api/human/verify")
+async def human_verify(data: dict, request: Request):
+    """校验 Turnstile token，通过后下发签名 cookie（跨子域有效）。"""
+    if not (TURNSTILE_SITEKEY and TURNSTILE_SECRET):
+        return {"ok": True, "disabled": True}
+    token = (data.get("token") or "").strip()
+    if not token:
+        raise HTTPException(400, "缺少验证令牌")
+    if not turnstile_verify(token, _client_ip(request)):
+        raise HTTPException(400, "真人校验失败，请刷新重试")
+    resp = JSONResponse({"ok": True})
+    resp.set_cookie(HUMAN_COOKIE, make_human_cookie(), domain=COOKIE_DOMAIN,
+                    path="/", httponly=True, secure=True, samesite="lax",
+                    max_age=HUMAN_TTL)
+    return resp
+
 # ---------- 用户API ----------
 @app.post("/api/register")
 async def register(data: dict, request: Request):
+    if not human_ok(request):
+        raise HTTPException(403, "请先完成真人校验")
     username = (data.get("username") or "").strip()
     password = data.get("password") or ""
     if not valid_username(username):
@@ -234,6 +328,11 @@ async def register(data: dict, request: Request):
 async def login(data: dict, request: Request):
     username = (data.get("username") or "").strip()
     password = data.get("password") or ""
+    # 真人校验：全员强制，仅超级管理员豁免
+    # （同时作为安全阀：万一 Cloudflare 不可用，超管仍能登入后台处理）
+    _pre = db.get_user_by_name(username) if username else None
+    if not (_pre and _pre.get("is_super")) and not human_ok(request):
+        raise HTTPException(403, "请先完成真人校验")
     key = f"{_client_ip(request)}:{username}"
     left = _login_locked(key)
     if left:
@@ -287,6 +386,9 @@ async def auth_check(request: Request):
         raise HTTPException(403, "账号已被封禁")
     if not sub or user["subdomain"] != sub:
         raise HTTPException(403, "无权访问该空间")
+    # 真人校验：全员强制（超管豁免）。未通过则 403 → nginx 弹回主站过验证
+    if not user.get("is_super") and not human_ok(request):
+        raise HTTPException(403, "请先完成真人校验")
     db.touch(user["id"])
     # 鉴权通过即返回 200; 实例是否启动由 nginx proxy 的 502 处理(引导用户去启动)
     return {"ok": True}

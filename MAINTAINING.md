@@ -115,6 +115,13 @@ bash Web/deploy/reload-nginx.sh              # 重新生成用户子域配置
 | `Web/app/instances.py` `sweep_loop(interval)` | 扫描间隔 | 60 秒 |
 | `Web/app/main.py` `JWT_TTL` | 登录态有效期 | 30 天 |
 | `Web/app/main.py` `LOGIN_MAX_FAILS` / `LOGIN_LOCK_SECS` | 登录限流 | 5 次 / 300 秒 |
+| `Web/app/main.py` `HUMAN_TTL` | 真人校验免验时长 | 24 小时 |
+| `.env` `TURNSTILE_SITEKEY` / `TURNSTILE_SECRET` | 真人校验（留空=关闭） | 未配置 |
+
+**真人校验**（`.env` 配 `TURNSTILE_*` 即启用，留空即关闭）：
+- 全覆盖：主站落地页 + `/api/register` + `/api/login` + 用户子域 `auth_check`
+- **超管豁免**：`/api/login` 按用户名放行；`/api/human/status` 对超管会话返回 `required:false`；`auth_check` 跳过
+- 更新 `Web/app/static/announce.js` 后，记得把 nginx 注入 URL 的 `?v=N` 加一（否则浏览器用旧缓存）
 
 **用户数据**：`/opt/tomato-multi/data/users/u<N>/`
 - `config.yml`：该用户的下载配置（格式、保存路径等）

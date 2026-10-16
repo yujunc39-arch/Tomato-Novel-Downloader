@@ -2,6 +2,7 @@
 (function () {
   if (window.__announceLoaded) return;
   window.__announceLoaded = true;
+  window.__ANNOUNCE_VER__ = '3-gate-aware';   // 版本标记，便于确认浏览器加载的是新脚本
 
   function esc(s) {
     return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
@@ -37,6 +38,22 @@
     };
   }
 
+  // 页面若有真人校验门，先等它通关再弹公告
+  // （公告的 z-index 是 2147483647，会盖住验证门，所以必须让路）
+  function gatePending() {
+    if (window.__HUMAN_GATE_PENDING__) return true;
+    var g = document.getElementById('gate');
+    return !!(g && g.classList.contains('show'));
+  }
+  function afterGate(cb, tries) {
+    tries = tries || 0;
+    if (gatePending() && tries < 240) {          // 最多等 120 秒
+      setTimeout(function () { afterGate(cb, tries + 1); }, 500);
+      return;
+    }
+    cb();
+  }
+
   function run() {
     try {
       fetch('/__announce__', { cache: 'no-store' })
@@ -46,8 +63,10 @@
           var seen = null;
           try { seen = localStorage.getItem('__announce_seen'); } catch (e) {}
           if (seen === String(d.id)) return;
-          if (document.body) show(d);
-          else document.addEventListener('DOMContentLoaded', function () { show(d); });
+          if (document.body) afterGate(function () { show(d); });
+          else document.addEventListener('DOMContentLoaded', function () {
+            afterGate(function () { show(d); });
+          });
         })
         .catch(function () {});
     } catch (e) {}

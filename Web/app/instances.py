@@ -285,7 +285,7 @@ server {{
         proxy_buffering off;
         proxy_read_timeout 600s;
         client_max_body_size 200m;
-        sub_filter '</head>' '<script src="https://{DOMAIN}/static/announce.js"></script></head>';
+        sub_filter '</head>' '<script src="https://{DOMAIN}/static/announce.js?v=3"></script></head>';
         sub_filter_once on;
     }}
 

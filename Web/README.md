@@ -193,6 +193,56 @@ nginx -s reload                       # 只改了 nginx / 证书
 
 ---
 
+## 🛡 真人校验（Cloudflare Turnstile）
+
+**作用**：拦掉机器人与脚本批量注册/登录，访客进站先过一次真人验证。
+
+**覆盖范围**（全部强制，**超级管理员豁免**）：
+
+| 入口 | 说明 |
+|------|------|
+| 主站落地页 | 全屏验证门，通过后才显示登录/注册 |
+| `POST /api/register` | 未验证 → `403` |
+| `POST /api/login` | 未验证 → `403`（超管账号除外） |
+| 用户子域名 `uN.域名` | `auth_check` 子请求同样校验，未通过 → 弹回主站验证 |
+
+**通过后**下发一个 HMAC 签名 cookie（域级 `.DOMAIN`，24 小时有效），
+所以**验证一次，主站和所有子域名都通行**。cookie 无法伪造（签名用 `TOMATO_SECRET` 校验）。
+
+**超管豁免的实现**：
+- `/api/login`：按用户名判断，超级管理员直接放行
+- `/api/human/status`：当前会话是超管 → 返回 `required:false`，前端**不弹验证门**
+- `/api/auth_check`：超管访问子域名不校验
+
+> 这也是一道**安全阀**：万一 Cloudflare 在国内不好访问，超管仍能登入后台处理。
+
+**配置**（`.env`）：
+```ini
+TURNSTILE_SITEKEY=0x4AAAAAAA...   # 公开，前端用
+TURNSTILE_SECRET=0x4AAAAAAA...    # 私密，服务端校验用
+```
+不配置这两项 = **整个功能自动关闭**，站点行为与之前完全一致。
+
+**Cloudflare 侧准备**：
+1. 打开 [Turnstile 控制台](https://dash.cloudflare.com/?to=/:account/turnstile)
+2. Add site → 域名填 `tomato.你的域名`
+3. Widget Mode 选 **Managed**，复制 **Site Key** 与 **Secret Key** 填入 `.env`
+
+也可用 API 创建：
+```bash
+curl -X POST -H "Authorization: Bearer $CF_API_TOKEN" -H 'Content-Type: application/json' \
+  "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT_ID/challenges/widgets" \
+  -d '{"name":"my-site","domains":["tomato.example.com"],"mode":"managed"}'
+```
+
+**坑位提醒**：
+- 公告弹窗的 `z-index` 是 `2147483647`（int 最大值），会盖住验证门 →
+  `announce.js` 里做了「等验证门通关再弹」的处理（轮询 `window.__HUMAN_GATE_PENDING__`）
+- 更新 `announce.js` 后，把 nginx 注入 URL 的版本号 `?v=N` 加一，否则浏览器用旧缓存
+- 验证组件依赖 `challenges.cloudflare.com`，国内网络可能偏慢
+
+---
+
 ## 已知约束
 
 - 主站/子域用 Let's Encrypt **泛域名证书**（`*.域名`），续期后需 `nginx -s reload`

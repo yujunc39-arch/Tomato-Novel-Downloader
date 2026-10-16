@@ -38,6 +38,14 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC
 .box{background:#fff;border-radius:16px;padding:22px;width:100%;max-width:380px}
 .box h3{font-size:16px;color:#4a2c18;margin-bottom:14px;display:flex;justify-content:space-between;align-items:center}
 .box .close{cursor:pointer;color:#bbb;font-weight:700;padding:0 4px}
+/* 真人校验门 */
+.gate{position:fixed;inset:0;background:linear-gradient(135deg,#fdf2e9,#fff4e6);display:none;align-items:center;justify-content:center;z-index:99999;padding:24px}
+.gate.show{display:flex}
+.gate .gbox{background:#fff;border-radius:18px;padding:32px 24px;box-shadow:0 10px 40px rgba(230,120,30,.18);text-align:center;max-width:380px;width:100%}
+.gate .gicon{font-size:46px}
+.gate h2{font-size:19px;color:#e8590c;margin:10px 0 8px}
+.gate p{font-size:13px;color:#8a6d54;margin-bottom:18px;line-height:1.75}
+.gate .cfwrap{display:flex;justify-content:center;min-height:65px}
 </style>
 </head>
 <body>
@@ -108,6 +116,19 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC
   </div>
 </div>
 
+<!-- 真人校验门（进入站点先过这一关） -->
+<div class="gate" id="gate">
+  <div class="gbox">
+    <div class="gicon">🛡️</div>
+    <h2>真人校验</h2>
+    <p>为防止机器人滥用，请先完成下方验证<br>验证通过后 24 小时内无需重复操作</p>
+    <div class="cfwrap" id="cfBox"></div>
+    <div class="msg" id="gateMsg"></div>
+  </div>
+</div>
+
+<script>window.__HUMAN_GATE_PENDING__ = true;  /* 公告脚本会等这个标志变 false 再弹 */</script>
+<script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async defer></script>
 <script>
 const domain = window.location.hostname.replace(/^u\d+\./, '');
 function showTab(t){
@@ -215,9 +236,14 @@ if(location.search.includes('need_login')){
   const m=document.getElementById('loginMsg');
   if(m){
     m.className='msg err';
-    m.textContent = location.search.includes('need_login=admin')
-      ? '请用管理员账号登录后访问管理后台'
-      : '请先登录，再访问你的专属空间';
+    if(location.search.includes('need_login=admin')){
+      m.textContent = '请用管理员账号登录后访问管理后台';
+    }else{
+      // 已登录却被拦 = 多半是真人校验过期，分情况提示
+      api('/api/me')
+        .then(()=>{ m.textContent = '真人验证已过期，请重新验证后再进入你的专属空间'; })
+        .catch(()=>{ m.textContent = '请先完成真人校验并登录，再访问你的专属空间'; });
+    }
   }
 }
 // 实例未启动被弹回 -> 显示面板并提示用户自己启动
@@ -225,6 +251,46 @@ if(location.search.includes('need_start')){
   const dm=document.getElementById('dashMsg');
   if(dm){ dm.className='msg'; dm.textContent='⚠️ 你的下载空间还没启动，点击上方按钮启动'; }
 }
+
+// ---------- 真人校验门 ----------
+let _gateRendered=false;
+function gateMsg(t, err){
+  const m=document.getElementById('gateMsg');
+  m.className = err ? 'msg err' : 'msg';
+  m.textContent = t;
+}
+function waitTurnstile(cb, tries=0){
+  if(window.turnstile && window.turnstile.render) return cb();
+  if(tries>150) return gateMsg('验证组件加载失败，请检查网络后刷新页面', true);
+  setTimeout(()=>waitTurnstile(cb, tries+1), 100);
+}
+async function onHumanOk(token){
+  try{
+    await api('/api/human/verify',{method:'POST',body:JSON.stringify({token})});
+    document.getElementById('gate').classList.remove('show');
+    window.__HUMAN_GATE_PENDING__ = false;      // 放行 → 公告可以弹了
+  }catch(e){ gateMsg('❌ '+e.message, true); }
+}
+(async function initGate(){
+  let s;
+  try{ s = await api('/api/human/status'); }catch(e){ s = null; }
+  if(!s || !s.required || s.ok){                // 未启用 / 超管 / 24h 内已通过
+    window.__HUMAN_GATE_PENDING__ = false;
+    return;
+  }
+  document.getElementById('gate').classList.add('show');
+  waitTurnstile(()=>{
+    if(_gateRendered) return;
+    _gateRendered = true;
+    turnstile.render('#cfBox', {
+      sitekey: s.sitekey,
+      callback: onHumanOk,
+      theme: 'light',
+      'error-callback': ()=>gateMsg('校验组件出错，请刷新页面重试', true),
+      'expired-callback': ()=>gateMsg('校验已过期，请重新验证', true)
+    });
+  });
+})();
 </script>
 </body>
 </html>

@@ -173,6 +173,7 @@ export TOMATO_KS_FILE=../release.jks TOMATO_KS_PASS='口令' TOMATO_KS_ALIAS=rel
 - 网关启动时清理遗留的孤儿实例，保证与数据库一致
 
 **安全**
+- 🛡 **Cloudflare Turnstile 真人校验**：进站先过验证（主站 + 用户子域全覆盖，**超管豁免**）
 - 全局默认拒绝中间件：除白名单外所有 `/api/*` 强制登录
 - SQL 全参数化、密码 bcrypt、JWT + `sessions` 表会话吊销
 - 登录限流（同 IP+账号 5 次失败锁 5 分钟）、注册限流（每 IP 每小时 10 个）
