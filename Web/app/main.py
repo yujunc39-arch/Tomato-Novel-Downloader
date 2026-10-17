@@ -472,12 +472,14 @@ async def me_library(request: Request):
 async def admin_users(request: Request):
     admin_required(request)
     rows = db.list_users()
-    # 附加磁盘用量
+    # 批量判活：只抓一次进程快照，避免每个用户 spawn 一次 pgrep
+    # （先前 1254 个用户逐个 is_running 实测耗时 16.7 秒）
+    running_map = instances.batch_is_running(rows)
     for u in rows:
         u.pop("password_hash", None)   # 不向前端返回密码哈希
         d = u["data_dir"] or resolve_data_dir(u["id"])
         u["disk_usage"] = _dir_size(d) if os.path.isdir(d) else 0
-        u["running"] = instances.is_running(u["id"])
+        u["running"] = running_map.get(u["id"], False)
         u["started_at"] = instances.get_started_at(u["id"]) if u["running"] else None
         u["books"] = _count_books(d) if os.path.isdir(d) else 0
     return {"users": rows}
