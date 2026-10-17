@@ -41,7 +41,7 @@ async function doLogin(){
   if(!u||!p){m.className='msg err';m.textContent='请输入用户名和密码';return;}
   m.className='msg';m.textContent='登录中…';
   try{
-    const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},
+    const r=await fetch('/api/admin/login',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({username:u,password:p})});
     const d=await r.json().catch(()=>({}));
     if(!r.ok){m.className='msg err';m.textContent=d.detail||'用户名或密码错误';return;}

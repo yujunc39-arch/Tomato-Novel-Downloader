@@ -109,6 +109,7 @@ sudo bash install.sh
 |------|------|------|
 | POST | `/api/register` | 注册 |
 | POST | `/api/login` | 登录（下发跨子域 `token` cookie） |
+| POST | `/api/admin/login` | **管理后台专用登录**：不要求真人校验，仅管理员账号可过（沿用登录限流） |
 | POST | `/api/logout` | 退出（吊销当前会话） |
 | GET | `/api/me` | 当前用户信息 + 实例状态 |
 | POST | `/api/me/start` | 启动个人实例 |
@@ -203,8 +204,12 @@ nginx -s reload                       # 只改了 nginx / 证书
 |------|------|
 | 主站落地页 | 全屏验证门，通过后才显示登录/注册 |
 | `POST /api/register` | 未验证 → `403` |
-| `POST /api/login` | 未验证 → `403`（超管账号除外） |
+| `POST /api/login` | 未验证 → `403`（**全员，无用户名豁免**） |
 | 用户子域名 `uN.域名` | `auth_check` 子请求同样校验，未通过 → 弹回主站验证 |
+
+> **例外：管理后台登录**走独立的 `POST /api/admin/login`，**不需要真人校验**
+> （后台登录页没有验证组件）。该接口只允许 `is_admin` 账号通过，
+> 且沿用同样的登录限流（5 次失败锁 5 分钟），非管理员账号一律拒绝。
 
 **通过后**下发一个 HMAC 签名 cookie（域级 `.DOMAIN`，24 小时有效），
 所以**验证一次，主站和所有子域名都通行**。cookie 无法伪造（签名用 `TOMATO_SECRET` 校验）。

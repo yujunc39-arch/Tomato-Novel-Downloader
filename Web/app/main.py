@@ -64,7 +64,8 @@ app.mount("/static", StaticFiles(directory="/opt/tomato-multi/app/static"), name
 
 # ---- 允许匿名访问的接口白名单(其余 /api/* 一律要求登录) ----
 PUBLIC_API = {"/api/register", "/api/login", "/api/logout", "/api/auth_check",
-              "/api/download/app", "/api/human/status", "/api/human/verify"}
+              "/api/download/app", "/api/human/status", "/api/human/verify",
+              "/api/admin/login"}
 
 def bj_now():
     """北京时间(UTC+8)。服务器运行在 UTC, 这里加 8 小时。"""
@@ -356,6 +357,40 @@ async def login(data: dict, request: Request):
                         httponly=True, secure=True, samesite="lax", max_age=JWT_TTL)
     except Exception:
         pass
+    return resp
+
+@app.post("/api/admin/login")
+async def admin_login(data: dict, request: Request):
+    """管理后台专用登录：不要求真人校验（后台登录页没有验证组件），
+    但只允许**管理员账号**通过，并沿用同样的登录限流（5 次失败锁 5 分钟）。"""
+    username = (data.get("username") or "").strip()
+    password = data.get("password") or ""
+    key = f"admin:{_client_ip(request)}:{username}"
+    left = _login_locked(key)
+    if left:
+        raise HTTPException(429, f"尝试过于频繁，请 {left} 秒后再试")
+    user = db.get_user_by_name(username)
+    if not user or not user.get("password_hash") or not verify_pw(password, user["password_hash"]):
+        _login_fail(key)
+        raise HTTPException(401, "用户名或密码错误")
+    if user["status"] == "banned":
+        raise HTTPException(403, "账号已被封禁")
+    if not user["is_admin"]:
+        # 非管理员账号：也计入失败次数，避免该接口被用来批量撞普通账号
+        _login_fail(key)
+        raise HTTPException(403, "该账号无权访问管理后台")
+    _login_ok(key)
+    pv = db.get_pwd_version(user["id"])
+    sid = db.create_session(user["id"], pv)
+    token = make_token(user["id"], True, sid, pv)
+    db.touch(user["id"])
+    resp = JSONResponse({"ok": True, "token": token, "username": username, "is_admin": True})
+    try:
+        resp.set_cookie("token", token, domain=COOKIE_DOMAIN, path="/",
+                        httponly=True, secure=True, samesite="lax", max_age=JWT_TTL)
+    except Exception:
+        pass
+    audit(user, request, "管理员登录后台", f"账号={username}")
     return resp
 
 @app.post("/api/logout")
