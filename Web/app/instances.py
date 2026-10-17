@@ -83,31 +83,44 @@ def start_instance(uid, port, data_dir):
             time.sleep(0.3)
         return _port_open("127.0.0.1", port)
 
-def _is_process_alive(uid):
+def _proc_snapshot():
+    """一次性抓取所有 tomato 进程命令行。
+    批量判活必须用这个：否则每个用户 spawn 一次 pgrep
+    （1254 用户实测 ≈ 16.7 秒，而一次快照只需几毫秒）。"""
+    try:
+        out = subprocess.run("pgrep -af tomato", shell=True,
+                             capture_output=True, text=True, timeout=3).stdout
+        return out.splitlines()
+    except Exception:
+        return []
+
+def _alive_with_snapshot(u, lines):
+    """用给定进程快照判断某用户实例是否存活：端口通 或 命令行 --data-dir 精确匹配。"""
+    port = u.get("port")
+    data_dir = u.get("data_dir") or os.path.join(BASE_DATA, u.get("subdomain") or "")
+    if port and _port_open("127.0.0.1", port):
+        return True
+    for line in lines:
+        if _proc_line_matches(line, data_dir):
+            return True
+    return False
+
+def batch_is_running(users):
+    """批量判断实例是否运行（1 次 pgrep + N 次端口探测）。返回 {uid: bool}。"""
+    lines = _proc_snapshot()
+    return {u["id"]: _alive_with_snapshot(u, lines) for u in users}
+
+def _is_process_alive(uid, lines=None):
     """检查用户实例是否活着(端口通 或 进程在, 只要有一个活着就算在跑)。
-    只有端口不通 且 进程不在, 才算未运行。"""
-    import db, subprocess, re
+    只有端口不通 且 进程不在, 才算未运行。
+    lines: 可传入 _proc_snapshot() 的结果以复用（批量场景显著提速）。"""
+    import db
     u = db.get_user_by_id(uid)
     if not u:
         return False
-    port = u.get("port")
-    data_dir = u.get("data_dir") or os.path.join(BASE_DATA, u["subdomain"])
-    
-    # 1) 端口探测
-    if port and _port_open("127.0.0.1", port):
-        return True
-    
-    # 2) 进程探测(通过 --data-dir 匹配)
-    try:
-        out = subprocess.run("pgrep -a tomato", shell=True, 
-                            capture_output=True, text=True, timeout=3).stdout
-        for line in out.splitlines():
-            if _proc_line_matches(line, data_dir):
-                return True
-    except Exception:
-        pass
-    
-    return False
+    if lines is None:
+        lines = _proc_snapshot()
+    return _alive_with_snapshot(u, lines)
 
 def clean_user_data(data_dir):
     """清空用户的 books 和 logs 目录下所有文件(实例关闭时自动执行)。
@@ -366,13 +379,15 @@ def reap_stale():
     
     # 2) 检测所有用户: 若实例已关闭(端口和进程都不在)则清空 books 和 logs
     #    保证: 实例关闭后, books 和 logs 目录下必定为空
+    #    注意: 这里只抓一次进程快照，否则每个用户 spawn 一次 pgrep(实测 1254 用户 ≈ 16.7s)
+    lines = _proc_snapshot()
     for u in users:
         if u["status"] != "active":
             continue
         uid = u["id"]
         data_dir = u.get("data_dir") or os.path.join(BASE_DATA, u["subdomain"])
         # 进程和端口都不在 = 已关闭 -> 清空 books 和 logs
-        if not _is_process_alive(uid):
+        if not _is_process_alive(uid, lines):
             try:
                 clean_user_data(data_dir)
             except Exception:
