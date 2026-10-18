@@ -59,65 +59,68 @@ EMAIL_VERIFY = bool(SMTP_HOST and SMTP_USER and SMTP_PASS)
 # 可用 .env 的 DAILY_REG_LIMIT 调整；<=0 表示不限制
 DAILY_REG_LIMIT = int((os.environ.get("DAILY_REG_LIMIT")
                        or _ENV.get("DAILY_REG_LIMIT") or "100").strip() or 100)
-QUOTA_MSG = "今日已达到最高注册数量，请明天再试。（已注册的用户可正常使用，不受影响）"
+QUOTA_MSG = "今日已达到最高注册数量，请明天再试。（每日早上 8 点重置名额，已注册的用户可正常使用）"
 
 def quota_exhausted():
-    """今天是否已达注册/发信上限（按北京时间自然日）。"""
-    if DAILY_REG_LIMIT <= 0:
+    """今日是否已达发信/注册上限（以 Resend 官方额度为准）。"""
+    lim = daily_limit()
+    if lim <= 0:
         return False
-    d = db.get_daily()
-    if (d.get("regs") or 0) >= DAILY_REG_LIMIT:
+    if sends_today() >= lim:
         return True
-    return sends_today() >= DAILY_REG_LIMIT
+    return (db.get_daily().get("regs") or 0) >= lim
 
 # ---------- 今日发信量：优先读 Resend 真实用量 ----------
 RESEND_API_KEY = (os.environ.get("RESEND_API_KEY")
                   or _ENV.get("RESEND_API_KEY") or "").strip()
-_sends_cache = {"ts": 0.0, "count": 0}
-_SENDS_CACHE_TTL = 60          # 秒，避免每次页面加载都打 Resend
+_usage_cache = {"ts": 0.0, "data": None}
+_USAGE_CACHE_TTL = 60          # 秒，避免每次页面加载都打 Resend
 
-def sends_today() -> int:
-    """今天（北京时间）实际发出的邮件数。
-    配了 RESEND_API_KEY 就直接问 Resend（权威），否则回退本地计数。"""
+def resend_usage():
+    """读取 Resend 官方用量（权威）。
+    返回 {used, limit, resets_at, month_used, month_limit}；失败返回上次成功值或 None。"""
     if not RESEND_API_KEY:
-        return db.get_daily().get("sends") or 0
+        return None
     now = time.time()
-    if now - _sends_cache["ts"] < _SENDS_CACHE_TTL:
-        return _sends_cache["count"]
+    if _usage_cache["data"] is not None and now - _usage_cache["ts"] < _USAGE_CACHE_TTL:
+        return _usage_cache["data"]
     try:
         import urllib.request as _ur
-        from datetime import datetime, timezone, timedelta
-        bj = timezone(timedelta(hours=8))
-        today = datetime.now(bj).strftime("%Y-%m-%d")
-        total = 0
-        url = "https://api.resend.com/emails?limit=100"
-        for _ in range(10):
-            req = _ur.Request(url, headers={
-                "Authorization": "Bearer " + RESEND_API_KEY,
-                "User-Agent": "tomato-gateway"})
-            with _ur.urlopen(req, timeout=5) as r:
-                d = json.loads(r.read().decode())
-            data = d.get("data") or []
-            stop = False
-            for m in data:
-                try:
-                    ts = datetime.fromisoformat(m["created_at"]).astimezone(bj)
-                except Exception:
-                    continue
-                if ts.strftime("%Y-%m-%d") == today:
-                    total += 1
-                elif ts.strftime("%Y-%m-%d") < today:
-                    stop = True          # 已翻到昨天，不用再往后翻
-                    break
-            if stop or not d.get("has_more") or not data:
-                break
-            url = "https://api.resend.com/emails?limit=100&after=" + data[-1]["id"]
-        _sends_cache["ts"] = now
-        _sends_cache["count"] = total
-        return total
+        req = _ur.Request("https://api.resend.com/usage", headers={
+            "Authorization": "Bearer " + RESEND_API_KEY,
+            "User-Agent": "tomato-gateway"})
+        with _ur.urlopen(req, timeout=5) as r:
+            d = json.loads(r.read().decode())
+        e = d.get("emails") or {}
+        daily = e.get("daily") or {}
+        monthly = e.get("monthly") or {}
+        out = {
+            "used": int(daily.get("used") or 0),
+            "limit": int(daily.get("limit") or 0),
+            "resets_at": daily.get("resets_at"),
+            "month_used": int(monthly.get("used") or 0),
+            "month_limit": int(monthly.get("limit") or 0),
+        }
+        _usage_cache["ts"] = now
+        _usage_cache["data"] = out
+        return out
     except Exception as e:
         print("resend usage error:", e)
-        return db.get_daily().get("sends") or 0
+        return _usage_cache["data"]
+
+def sends_today() -> int:
+    """今日已发送邮件数（优先 Resend 官方用量，否则回退本地计数）。"""
+    u = resend_usage()
+    if u is not None:
+        return u["used"]
+    return db.get_daily().get("sends") or 0
+
+def daily_limit() -> int:
+    """每日发信上限（优先 Resend 官方 limit，否则用配置的 DAILY_REG_LIMIT）。"""
+    u = resend_usage()
+    if u and u["limit"] > 0:
+        return u["limit"]
+    return DAILY_REG_LIMIT
 
 EMAIL_RE = re.compile(r"^[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}$")
 
@@ -427,18 +430,21 @@ def turnstile_verify(token: str, ip: str) -> bool:
 @app.get("/api/site_info")
 async def site_info():
     """公开站点配置：前端据此决定是否显示邮箱验证字段 / 今日是否还有名额。"""
+    lim = daily_limit()
     regs = db.get_daily().get("regs") or 0
-    sends = sends_today()          # 以 Resend 实际发送量为准
+    sends = sends_today()
     left = -1
-    if DAILY_REG_LIMIT > 0:
-        left = max(0, DAILY_REG_LIMIT - max(regs, sends))
+    if lim > 0:
+        left = max(0, lim - max(regs, sends))
+    u = resend_usage() or {}
     return {"email_verify": EMAIL_VERIFY,
             "human_required": bool(TURNSTILE_SITEKEY and TURNSTILE_SECRET),
             "code_ttl": db.CODE_TTL,
             "allowed_domains": sorted(ALLOWED_EMAIL_DOMAINS),
-            "daily_limit": DAILY_REG_LIMIT,
+            "daily_limit": lim,
             "sent_today": sends,
             "left_today": left,
+            "resets_at": u.get("resets_at"),
             "quota_exhausted": bool(EMAIL_VERIFY and quota_exhausted())}
 
 @app.get("/api/human/status")
