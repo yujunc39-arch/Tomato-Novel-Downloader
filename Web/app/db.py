@@ -64,6 +64,14 @@ def init_db():
             ip          TEXT
         )
     """)
+    # 每日配额（控制注册量 / 保护发信额度）
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS daily_stats (
+            day   TEXT PRIMARY KEY,
+            sends INTEGER DEFAULT 0,
+            regs  INTEGER DEFAULT 0
+        )
+    """)
     conn.commit()
     conn.close()
 
@@ -286,3 +294,32 @@ def cleanup_expired_codes():
         conn.commit()
     finally:
         conn.close()
+
+# ---------- 每日配额（按北京时间自然日） ----------
+def bj_day(ts=None):
+    """北京时间（UTC+8）的日期字符串 YYYY-MM-DD。"""
+    t = ts if ts is not None else time.time()
+    return time.strftime("%Y-%m-%d", time.gmtime(t + 8 * 3600))
+
+def bump_daily(field):
+    """给今天的计数器 +1。field: 'sends' 或 'regs'。"""
+    if field not in ("sends", "regs"):
+        return
+    day = bj_day()
+    conn = _connect()
+    try:
+        conn.execute("INSERT INTO daily_stats(day,sends,regs) VALUES(?,0,0) "
+                     "ON CONFLICT(day) DO NOTHING", (day,))
+        conn.execute("UPDATE daily_stats SET {0} = COALESCE({0},0) + 1 WHERE day=?".format(field),
+                     (day,))
+        conn.commit()
+    finally:
+        conn.close()
+
+def get_daily(day=None):
+    """返回某天的 {'sends': n, 'regs': n}，默认今天。"""
+    day = day or bj_day()
+    conn = _connect()
+    r = conn.execute("SELECT sends, regs FROM daily_stats WHERE day=?", (day,)).fetchone()
+    conn.close()
+    return dict(r) if r else {"sends": 0, "regs": 0}
