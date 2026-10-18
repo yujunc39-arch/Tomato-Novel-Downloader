@@ -55,6 +55,19 @@ SMTP_SSL  = (os.environ.get("SMTP_SSL")  or _ENV.get("SMTP_SSL")  or "1").strip(
 SMTP_TLS  = (os.environ.get("SMTP_TLS")  or _ENV.get("SMTP_TLS")  or "0").strip() == "1"
 EMAIL_VERIFY = bool(SMTP_HOST and SMTP_USER and SMTP_PASS)
 
+# 每日注册上限（同时保护发信额度，避免把 Resend 免费额度打爆）
+# 可用 .env 的 DAILY_REG_LIMIT 调整；<=0 表示不限制
+DAILY_REG_LIMIT = int((os.environ.get("DAILY_REG_LIMIT")
+                       or _ENV.get("DAILY_REG_LIMIT") or "100").strip() or 100)
+QUOTA_MSG = "今日已达到最高注册数量，请明天再试"
+
+def quota_exhausted():
+    """今天是否已达注册/发信上限（按北京时间自然日）。"""
+    if DAILY_REG_LIMIT <= 0:
+        return False
+    d = db.get_daily()
+    return (d.get("regs") or 0) >= DAILY_REG_LIMIT or (d.get("sends") or 0) >= DAILY_REG_LIMIT
+
 EMAIL_RE = re.compile(r"^[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}$")
 
 # 只允许这些邮箱服务商（留空 = 不限制）。可用 .env 的 EMAIL_ALLOWED_DOMAINS 覆盖，逗号分隔
@@ -334,11 +347,19 @@ def turnstile_verify(token: str, ip: str) -> bool:
 
 @app.get("/api/site_info")
 async def site_info():
-    """公开站点配置：前端据此决定是否显示邮箱验证字段。"""
+    """公开站点配置：前端据此决定是否显示邮箱验证字段 / 今日是否还有名额。"""
+    d = db.get_daily()
+    regs, sends = d.get("regs") or 0, d.get("sends") or 0
+    left = -1
+    if DAILY_REG_LIMIT > 0:
+        left = max(0, DAILY_REG_LIMIT - max(regs, sends))
     return {"email_verify": EMAIL_VERIFY,
             "human_required": bool(TURNSTILE_SITEKEY and TURNSTILE_SECRET),
             "code_ttl": db.CODE_TTL,
-            "allowed_domains": sorted(ALLOWED_EMAIL_DOMAINS)}
+            "allowed_domains": sorted(ALLOWED_EMAIL_DOMAINS),
+            "daily_limit": DAILY_REG_LIMIT,
+            "left_today": left,
+            "quota_exhausted": bool(EMAIL_VERIFY and quota_exhausted())}
 
 @app.get("/api/human/status")
 async def human_status(request: Request):
@@ -373,6 +394,8 @@ async def register_send_code(data: dict, request: Request):
         raise HTTPException(403, "请先完成真人校验")
     if not EMAIL_VERIFY:
         raise HTTPException(503, "邮箱验证暂未开启")
+    if quota_exhausted():
+        raise HTTPException(429, QUOTA_MSG)
     email = (data.get("email") or "").strip().lower()
     check_email(email)
     if db.get_user_by_email(email):
@@ -398,13 +421,20 @@ async def register_send_code(data: dict, request: Request):
     try:
         send_mail(email, "【番茄小说下载器】注册验证码", body)
     except Exception as e:
+        emsg = str(e).lower()
+        # 发信服务商额度耗尽 -> 统一按"今日名额已满"提示
+        if any(k in emsg for k in ("quota", "limit", "429", "rate", "exceeded", "too many")):
+            raise HTTPException(429, QUOTA_MSG)
         raise HTTPException(502, "邮件发送失败：" + str(e)[:120])
+    db.bump_daily("sends")
     return {"ok": True, "expires_in": db.CODE_TTL}
 
 @app.post("/api/register")
 async def register(data: dict, request: Request):
     if not human_ok(request):
         raise HTTPException(403, "请先完成真人校验")
+    if EMAIL_VERIFY and quota_exhausted():
+        raise HTTPException(429, QUOTA_MSG)
     username = (data.get("username") or "").strip()
     password = data.get("password") or ""
     if not valid_username(username):
@@ -439,6 +469,8 @@ async def register(data: dict, request: Request):
                          email=(email if EMAIL_VERIFY else None))
     if not uid:
         raise HTTPException(400, "注册失败")
+    if EMAIL_VERIFY:
+        db.bump_daily("regs")
     u = db.get_user_by_id(uid)
     data_dir = u["data_dir"]
     os.makedirs(data_dir, exist_ok=True)
