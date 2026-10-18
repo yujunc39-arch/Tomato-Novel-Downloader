@@ -62,13 +62,12 @@ DAILY_REG_LIMIT = int((os.environ.get("DAILY_REG_LIMIT")
 QUOTA_MSG = "今日已达到最高注册数量，请明天再试。（每日早上 8 点重置名额，已注册的用户可正常使用）"
 
 def quota_exhausted():
-    """今日是否已达发信/注册上限（以 Resend 官方额度为准）。"""
+    """今日是否已达发信上限——完全以 Resend 剩余额度为准。
+    还有额度（used < limit）就放行；达到 limit 即停止。"""
     lim = daily_limit()
     if lim <= 0:
         return False
-    if sends_today() >= lim:
-        return True
-    return (db.get_daily().get("regs") or 0) >= lim
+    return sends_today() >= lim
 
 # ---------- 今日发信量：优先读 Resend 真实用量 ----------
 RESEND_API_KEY = (os.environ.get("RESEND_API_KEY")
@@ -435,7 +434,7 @@ async def site_info():
     sends = sends_today()
     left = -1
     if lim > 0:
-        left = max(0, lim - max(regs, sends))
+        left = max(0, lim - sends)
     u = resend_usage() or {}
     return {"email_verify": EMAIL_VERIFY,
             "human_required": bool(TURNSTILE_SITEKEY and TURNSTILE_SECRET),
@@ -513,6 +512,12 @@ async def register_send_code(data: dict, request: Request):
             raise HTTPException(429, QUOTA_MSG)
         raise HTTPException(502, "邮件发送失败：" + str(e)[:120])
     db.bump_daily("sends")
+    # 本地先给缓存 +1，避免 60 秒缓存窗口内多放过几封
+    try:
+        if _usage_cache["data"] is not None:
+            _usage_cache["data"]["used"] = (_usage_cache["data"].get("used") or 0) + 1
+    except Exception:
+        pass
     return {"ok": True, "expires_in": db.CODE_TTL}
 
 @app.post("/api/register")
