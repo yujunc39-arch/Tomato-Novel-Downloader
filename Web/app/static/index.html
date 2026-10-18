@@ -74,6 +74,13 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC
     </div>
     <div id="regForm" class="hidden">
       <input class="input" id="regUser" placeholder="用户名(至少2字符)">
+      <div id="emailBlock" class="hidden">
+        <input class="input" id="regEmail" type="email" placeholder="邮箱（用于接收验证码）" autocomplete="email">
+        <div style="display:flex;gap:8px;margin-bottom:14px">
+          <input class="input" id="regCode" placeholder="6 位验证码" maxlength="6" inputmode="numeric" autocomplete="one-time-code" style="flex:1;margin-bottom:0">
+          <button class="btn" id="sendCodeBtn" onclick="sendCode()" style="width:auto;flex:0 0 auto;padding:12px 14px;font-size:14px;white-space:nowrap">获取验证码</button>
+        </div>
+      </div>
       <input class="input" id="regPass" type="password" placeholder="密码(至少6位)">
       <input class="input" id="regPass2" type="password" placeholder="确认密码">
       <button class="btn" onclick="register()">注册并进入</button>
@@ -145,13 +152,51 @@ async function api(path, opts={}){
   if(!r.ok) throw new Error(d.detail||'请求失败');
   return d;
 }
+let _emailVerify = false;
+let _codeTimer = null;
+async function sendCode(){
+  const email = (document.getElementById('regEmail').value || '').trim();
+  const msg = document.getElementById('regMsg');
+  const btn = document.getElementById('sendCodeBtn');
+  if(!email){ msg.className='msg err'; msg.textContent='请先填写邮箱'; return; }
+  btn.disabled = true;
+  msg.className='msg'; msg.textContent='正在发送验证码…';
+  try{
+    const d = await api('/api/register/send_code',{method:'POST',body:JSON.stringify({email})});
+    msg.className='msg ok';
+    msg.textContent='✅ 验证码已发送，请查收邮件（也看看垃圾箱）';
+    let left = 60;
+    btn.textContent = left + 's';
+    clearInterval(_codeTimer);
+    _codeTimer = setInterval(()=>{
+      left--;
+      if(left <= 0){ clearInterval(_codeTimer); btn.disabled=false; btn.textContent='重新获取'; }
+      else { btn.textContent = left + 's'; }
+    }, 1000);
+    // 自动聚焦到验证码框
+    const c = document.getElementById('regCode');
+    if(c) c.focus();
+  }catch(e){
+    btn.disabled = false;
+    msg.className='msg err';
+    msg.textContent = e.message;
+  }
+}
 async function register(){
   const u=document.getElementById('regUser').value.trim(), p=document.getElementById('regPass').value, p2=document.getElementById('regPass2').value;
   const msg=document.getElementById('regMsg');
+  const email=(document.getElementById('regEmail').value||'').trim();
+  const code=(document.getElementById('regCode').value||'').trim();
   if(!u||!p){msg.className='msg err';msg.textContent='请填写用户名和密码';return;}
   if(p!==p2){msg.className='msg err';msg.textContent='两次密码不一致';return;}
+  if(_emailVerify){
+    if(!email){msg.className='msg err';msg.textContent='请填写邮箱';return;}
+    if(!code){msg.className='msg err';msg.textContent='请填写邮箱验证码';return;}
+  }
   try{
-    await api('/api/register',{method:'POST',body:JSON.stringify({username:u,password:p})});
+    await api('/api/register',{method:'POST',body:JSON.stringify({
+      username:u, password:p, email:email, code:code
+    })});
     msg.className='msg ok';msg.textContent='注册成功，正在进入专属空间…';
     await doLogin(u,p);
     await launch();   // 自动启动并跳转
@@ -250,6 +295,21 @@ if(location.search.includes('need_start')){
   const dm=document.getElementById('dashMsg');
   if(dm){ dm.className='msg'; dm.textContent='⚠️ 你的下载空间还没启动，点击上方按钮启动'; }
 }
+
+// ---------- 站点配置（决定注册是否要邮箱验证）----------
+(async function initSiteInfo(){
+  try{
+    const d = await api('/api/site_info');
+    _emailVerify = !!d.email_verify;
+    if(_emailVerify) document.getElementById('emailBlock').classList.remove('hidden');
+    // 邮箱域名白名单提示
+    const doms = d.allowed_domains || [];
+    if(doms.length){
+      const inp = document.getElementById('regEmail');
+      if(inp) inp.placeholder = '邮箱（仅支持 ' + doms.map(x=>'@'+x).join(' / ') + '）';
+    }
+  }catch(e){ console.error('site_info error', e); }
+})();
 
 // ---------- 真人校验门 ----------
 let _gateRendered=false;
