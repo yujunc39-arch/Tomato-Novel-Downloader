@@ -159,7 +159,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC
     <div id="usersBody" style="display:none;margin-top:14px;border-top:1px solid #f0ebe4;padding-top:12px">
       <div style="max-height:400px;overflow-y:auto;padding-right:4px">
         <div class="row" style="margin-bottom:8px;flex-wrap:wrap;gap:6px">
-          <input class="input" id="searchBox" placeholder="🔍 搜索用户名 / 子域名 / ID" style="flex:1;min-width:130px" oninput="renderUsers()">
+          <input class="input" id="searchBox" placeholder="🔍 搜索用户名 / 子域名 / ID / 邮箱" style="flex:1;min-width:130px" oninput="renderUsers()">
           <select class="input" id="fBan"  style="flex:0 0 72px;font-size:12px;padding:8px 5px" onchange="renderUsers()">
             <option value="">状态</option>
             <option value="active">正常</option>
@@ -175,6 +175,11 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC
             <option value="">实例</option>
             <option value="running">运行</option>
             <option value="stopped">停止</option>
+          </select>
+          <select class="input" id="fMail" style="flex:0 0 78px;font-size:12px;padding:8px 5px" onchange="renderUsers()">
+            <option value="">邮箱</option>
+            <option value="has">已绑定</option>
+            <option value="none">未绑定</option>
           </select>
           <button class="btn ghost" style="padding:7px 10px;font-size:12px" onclick="resetFilter()">重置</button>
         </div>
@@ -355,6 +360,7 @@ function resetFilter(){
   document.getElementById('fBan').value='';
   document.getElementById('fAdmin').value='';
   document.getElementById('fRun').value='';
+  document.getElementById('fMail').value='';
   renderUsers();
 }
 function renderUsers(){
@@ -364,9 +370,10 @@ function renderUsers(){
   const fb=document.getElementById('fBan').value;
   const fa=document.getElementById('fAdmin').value;
   const fr=document.getElementById('fRun').value;
+  const fm=document.getElementById('fMail').value;
   let list=users.filter(u=>{
     if(q){
-      const hay=(u.username+' '+u.subdomain+' '+u.id).toLowerCase();
+      const hay=(u.username+' '+u.subdomain+' '+u.id+' '+(u.email||'')).toLowerCase();
       if(hay.indexOf(q)<0) return false;
     }
     if(fb && u.status!==fb) return false;
@@ -375,6 +382,8 @@ function renderUsers(){
     if(fa==='user' && u.is_admin) return false;
     if(fr==='running' && !u.running) return false;
     if(fr==='stopped' && u.running) return false;
+    if(fm==='has' && !(u.email||'').trim()) return false;
+    if(fm==='none' && (u.email||'').trim()) return false;
     return true;
   });
   document.getElementById('countMsg').textContent='显示 '+list.length+' / '+users.length+' 个用户';
@@ -407,7 +416,7 @@ function renderUsers(){
     }
     return `<div class="ucard">
       <div class="uhead"><span class="uname">${esc(u.username)}</span>${tags.join('')}</div>
-      <div class="umeta">子域名 ${esc(u.subdomain)} · 邮箱 ${u.email ? esc(u.email) : '<span style="color:#e03131">未填写</span>'} · 内容 ${u.books} 项 · 磁盘 ${fmtSize(u.disk_usage)} · 注册 ${fmtTime(u.created_at)}${u.running && u.started_at ? ' · <span style="color:#2f9e44">启动于 '+fmtTime(u.started_at)+'</span>' : ''}</div>
+      <div class="umeta">子域名 ${esc(u.subdomain)}${u.is_super ? '' : ' · 邮箱 ' + (u.email ? esc(u.email) : '<span style="color:#e03131">未填写</span>')} · 内容 ${u.books} 项 · 磁盘 ${fmtSize(u.disk_usage)} · 注册 ${fmtTime(u.created_at)}${u.running && u.started_at ? ' · <span style="color:#2f9e44">启动于 '+fmtTime(u.started_at)+'</span>' : ''}</div>
       <div class="uops">${ops.join('')}</div>
     </div>`;
   }).join('') : '<div class="empty">'+(users.length?'没有匹配的用户':'暂无用户')+'</div>';
