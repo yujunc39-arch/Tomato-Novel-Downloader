@@ -111,21 +111,6 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC
   </div>
 </div>
 
-<!-- 强制补填邮箱弹窗（不可关闭） -->
-<div class="modal" id="emailModal">
-  <div class="box">
-    <h3>请填写邮箱 <span style="font-size:11px;color:#e8590c;font-weight:400">必填</span></h3>
-    <div style="font-size:13px;color:#8a6d54;line-height:1.75;margin-bottom:14px">
-      为了在账号异常、服务变更时能通知到你，请先补全邮箱。<br>
-      本次<b>不发送验证码</b>，也不会打扰你。
-    </div>
-    <input class="input" id="forceEmail" type="email" placeholder="你的邮箱" autocomplete="email">
-    <button class="btn" id="forceEmailBtn" onclick="submitForceEmail()">提交并继续</button>
-    <div class="msg" id="forceEmailMsg"></div>
-    <div style="font-size:12px;color:#c9a68a;text-align:center;margin-top:10px">未填写邮箱将无法启动下载空间</div>
-  </div>
-</div>
-
 <!-- 修改密码弹窗 -->
 <div class="modal" id="pwdModal">
   <div class="box">
@@ -237,38 +222,11 @@ async function loadDash(){
   document.getElementById('dashCard').classList.remove('hidden');
   document.getElementById('dashPort').textContent=d.subdomain;
   document.getElementById('dashSub').textContent=d.subdomain+'.'+domain;
-  // 未填邮箱 -> 强制弹窗 + 禁用启动按钮
-  const lb = document.getElementById('launchBtn');
-  if(d.need_email){
-    document.getElementById('emailModal').classList.add('show');
-    document.getElementById('forceEmailMsg').textContent = '';
-    const fe = document.getElementById('forceEmail');
-    if(fe) setTimeout(()=>{ try{ fe.focus(); }catch(e){} }, 60);
-    if(lb){ lb.disabled = true; lb.style.opacity='0.45'; lb.style.cursor='not-allowed'; }
-  }else{
-    if(lb){ lb.disabled = false; lb.style.opacity=''; lb.style.cursor=''; }
-  }
   // 显示实例状态与启动时间
   const dm=document.getElementById('dashMsg');
   if(dm && d.running && d.started_at){
     dm.className='msg ok';
     dm.textContent='✅ 空间已启动 · 启动于 '+fmtBJ(d.started_at);
-  }
-}
-async function submitForceEmail(){
-  const v=(document.getElementById('forceEmail').value||'').trim();
-  const m=document.getElementById('forceEmailMsg');
-  const btn=document.getElementById('forceEmailBtn');
-  if(!v){ m.className='msg err'; m.textContent='请填写邮箱'; return; }
-  btn.disabled=true;
-  try{
-    await api('/api/me/email',{method:'POST',body:JSON.stringify({email:v})});
-    m.className='msg ok'; m.textContent='✅ 已保存';
-    document.getElementById('emailModal').classList.remove('show');
-    await loadDash();
-  }catch(e){
-    m.className='msg err'; m.textContent=e.message;
-    btn.disabled=false;
   }
 }
 function fmtBJ(ts){
