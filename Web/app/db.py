@@ -148,6 +148,10 @@ def list_users():
 def set_status(uid, status):
     _exec("UPDATE users SET status=? WHERE id=?", (status, uid))
 
+def set_email(uid, email):
+    """设置用户邮箱（小写存储）。"""
+    _exec("UPDATE users SET email=? WHERE id=?", ((email or "").strip().lower(), uid))
+
 def set_admin(uid, val):
     _exec("UPDATE users SET is_admin=? WHERE id=?", (1 if val else 0, uid))
 
