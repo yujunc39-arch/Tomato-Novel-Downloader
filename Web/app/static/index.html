@@ -128,7 +128,6 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC
 </div>
 
 <script>window.__HUMAN_GATE_PENDING__ = true;  /* 公告脚本会等这个标志变 false 再弹 */</script>
-<script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async defer></script>
 <script>
 const domain = window.location.hostname.replace(/^u\d+\./, '');
 function showTab(t){
@@ -264,6 +263,15 @@ function waitTurnstile(cb, tries=0){
   if(tries>150) return gateMsg('验证组件加载失败，请检查网络后刷新页面', true);
   setTimeout(()=>waitTurnstile(cb, tries+1), 100);
 }
+// 只有真正需要验证时才去加载 Cloudflare 脚本（功能关闭时零外部请求）
+function loadTurnstileScript(){
+  if(window.__turnstileLoading || (window.turnstile && window.turnstile.render)) return;
+  window.__turnstileLoading = true;
+  var s = document.createElement('script');
+  s.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
+  s.async = true; s.defer = true;
+  document.head.appendChild(s);
+}
 async function onHumanOk(token){
   try{
     await api('/api/human/verify',{method:'POST',body:JSON.stringify({token})});
@@ -279,6 +287,7 @@ async function onHumanOk(token){
     return;
   }
   document.getElementById('gate').classList.add('show');
+  loadTurnstileScript();                        // 需要验证时才拉 CF 脚本
   waitTurnstile(()=>{
     if(_gateRendered) return;
     _gateRendered = true;
