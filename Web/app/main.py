@@ -587,17 +587,37 @@ async def me(request: Request):
     user = current_user(request)
     db.touch(user["id"])
     running = instances.is_running(user["id"])
+    email = (user.get("email") or "").strip()
     return {"id": user["id"], "username": user["username"],
             "subdomain": user["subdomain"], "is_admin": bool(user["is_admin"]),
             "is_super": bool(user.get("is_super")), "status": user["status"],
+            "email": email,
+            # 管理员豁免；普通用户未填邮箱则前端强制弹窗
+            "need_email": (not user["is_admin"]) and (not email),
             "running": running,
             "started_at": instances.get_started_at(user["id"]) if running else None}
+
+@app.post("/api/me/email")
+async def me_set_email(data: dict, request: Request):
+    """补填邮箱（无需验证码）。用于老用户强制补全邮箱。"""
+    user = current_user(request)
+    email = (data.get("email") or "").strip().lower()
+    if not email or len(email) > 120 or not EMAIL_RE.match(email):
+        raise HTTPException(400, "邮箱格式不正确")
+    other = db.get_user_by_email(email)
+    if other and other["id"] != user["id"]:
+        raise HTTPException(400, "该邮箱已被其他账号使用")
+    db.set_email(user["id"], email)
+    return {"ok": True, "email": email}
 
 # ---------- 用户自己的库/实例 ----------
 @app.post("/api/me/start")
 async def me_start(request: Request):
     """懒启动当前用户的番茄实例。"""
     user = current_user(request)
+    # 未补全邮箱不准开实例（管理员豁免）
+    if not user["is_admin"] and not (user.get("email") or "").strip():
+        raise HTTPException(403, "请先填写邮箱后再启动下载空间")
     instances.render_nginx()   # 确保子域名反代存在
     ok = instances.start_instance(user["id"], user["port"], user["data_dir"])
     db.touch(user["id"])
