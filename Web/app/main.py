@@ -88,7 +88,11 @@ def send_mail(to_addr: str, subject: str, body: str):
     from email.header import Header
     msg = EmailMessage()
     msg["Subject"] = str(Header(subject, "utf-8"))
-    msg["From"] = SMTP_FROM
+    # 加个中文发件人显示名，收件箱里更可信（纯地址会自动补上）
+    from_addr = SMTP_FROM
+    if "<" not in from_addr:
+        from_addr = "番茄小说下载器 <{}>".format(from_addr)
+    msg["From"] = from_addr
     msg["To"] = to_addr
     msg.set_content(body, charset="utf-8")
     if SMTP_SSL:
