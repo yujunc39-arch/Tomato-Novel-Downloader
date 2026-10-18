@@ -59,7 +59,7 @@ EMAIL_VERIFY = bool(SMTP_HOST and SMTP_USER and SMTP_PASS)
 # 可用 .env 的 DAILY_REG_LIMIT 调整；<=0 表示不限制
 DAILY_REG_LIMIT = int((os.environ.get("DAILY_REG_LIMIT")
                        or _ENV.get("DAILY_REG_LIMIT") or "100").strip() or 100)
-QUOTA_MSG = "今日已达到最高注册数量，请明天再试"
+QUOTA_MSG = "今日已达到最高注册数量，请明天再试。（已注册的用户可正常使用，不受影响）"
 
 def quota_exhausted():
     """今天是否已达注册/发信上限（按北京时间自然日）。"""
@@ -109,11 +109,14 @@ def valid_email(e: str) -> bool:
     ok, _ = _local_rule_ok(e)
     return ok
 
-def check_email(e: str):
-    """校验邮箱：通用格式 + 域名白名单 + 服务商前缀规则。不合格抛 HTTPException。"""
+def check_email(e: str, strict_domain: bool = True):
+    """校验邮箱。
+    strict_domain=True  : 通用格式 + 域名白名单 + 服务商前缀规则（注册用，严格）
+    strict_domain=False : 只校验格式 + 服务商前缀规则（老用户补填，不限域名，避免被卡死）
+    """
     if not e or len(e) > 120 or not EMAIL_RE.match(e):
         raise HTTPException(400, "邮箱格式不正确")
-    if ALLOWED_EMAIL_DOMAINS and email_domain(e) not in ALLOWED_EMAIL_DOMAINS:
+    if strict_domain and ALLOWED_EMAIL_DOMAINS and email_domain(e) not in ALLOWED_EMAIL_DOMAINS:
         raise HTTPException(400, "仅支持 " + ALLOWED_DOMAINS_HINT + " 邮箱")
     ok, msg = _local_rule_ok(e)
     if not ok:
@@ -627,7 +630,7 @@ async def me_set_email(data: dict, request: Request):
     """补填邮箱（无需验证码）。用于老用户强制补全邮箱。"""
     user = current_user(request)
     email = (data.get("email") or "").strip().lower()
-    check_email(email)          # 通用格式 + 域名白名单 + 服务商前缀规则
+    check_email(email, strict_domain=False)   # 补填放宽域名限制，但仍校验格式与服务商前缀
     other = db.get_user_by_email(email)
     if other and other["id"] != user["id"]:
         raise HTTPException(400, "该邮箱已被其他账号使用")
