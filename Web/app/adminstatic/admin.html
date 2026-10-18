@@ -407,7 +407,7 @@ function renderUsers(){
     }
     return `<div class="ucard">
       <div class="uhead"><span class="uname">${esc(u.username)}</span>${tags.join('')}</div>
-      <div class="umeta">子域名 ${esc(u.subdomain)} · 内容 ${u.books} 项 · 磁盘 ${fmtSize(u.disk_usage)} · 注册 ${fmtTime(u.created_at)}${u.running && u.started_at ? ' · <span style="color:#2f9e44">启动于 '+fmtTime(u.started_at)+'</span>' : ''}</div>
+      <div class="umeta">子域名 ${esc(u.subdomain)} · 邮箱 ${u.email ? esc(u.email) : '<span style="color:#e03131">未填写</span>'} · 内容 ${u.books} 项 · 磁盘 ${fmtSize(u.disk_usage)} · 注册 ${fmtTime(u.created_at)}${u.running && u.started_at ? ' · <span style="color:#2f9e44">启动于 '+fmtTime(u.started_at)+'</span>' : ''}</div>
       <div class="uops">${ops.join('')}</div>
     </div>`;
   }).join('') : '<div class="empty">'+(users.length?'没有匹配的用户':'暂无用户')+'</div>';
