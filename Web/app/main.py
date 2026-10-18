@@ -45,6 +45,66 @@ HUMAN_TTL = 24 * 3600        # 通过校验后 24 小时内免重复验证
 if TURNSTILE_SITEKEY and not TURNSTILE_SECRET:
     print("warn: TURNSTILE_SITEKEY 已配置但缺少 TURNSTILE_SECRET，真人校验将不可用")
 
+# ---- 邮件发送（注册邮箱验证）。SMTP_HOST/USER/PASS 都配置齐才会启用 ----
+SMTP_HOST = (os.environ.get("SMTP_HOST") or _ENV.get("SMTP_HOST") or "").strip()
+SMTP_PORT = int((os.environ.get("SMTP_PORT") or _ENV.get("SMTP_PORT") or "465").strip() or 465)
+SMTP_USER = (os.environ.get("SMTP_USER") or _ENV.get("SMTP_USER") or "").strip()
+SMTP_PASS = (os.environ.get("SMTP_PASS") or _ENV.get("SMTP_PASS") or "").strip()
+SMTP_FROM = (os.environ.get("SMTP_FROM") or _ENV.get("SMTP_FROM") or SMTP_USER).strip()
+SMTP_SSL  = (os.environ.get("SMTP_SSL")  or _ENV.get("SMTP_SSL")  or "1").strip() != "0"
+SMTP_TLS  = (os.environ.get("SMTP_TLS")  or _ENV.get("SMTP_TLS")  or "0").strip() == "1"
+EMAIL_VERIFY = bool(SMTP_HOST and SMTP_USER and SMTP_PASS)
+
+EMAIL_RE = re.compile(r"^[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}$")
+
+# 只允许这些邮箱服务商（留空 = 不限制）。可用 .env 的 EMAIL_ALLOWED_DOMAINS 覆盖，逗号分隔
+_domains_raw = (os.environ.get("EMAIL_ALLOWED_DOMAINS")
+                or _ENV.get("EMAIL_ALLOWED_DOMAINS")
+                or "qq.com,163.com,gmail.com").strip()
+ALLOWED_EMAIL_DOMAINS = {d.strip().lower() for d in _domains_raw.split(",") if d.strip()}
+ALLOWED_DOMAINS_HINT = " / ".join("@" + d for d in sorted(ALLOWED_EMAIL_DOMAINS))
+
+def email_domain(e: str) -> str:
+    return e.rsplit("@", 1)[-1].lower() if "@" in e else ""
+
+def valid_email(e: str) -> bool:
+    if not e or len(e) > 120 or not EMAIL_RE.match(e):
+        return False
+    if ALLOWED_EMAIL_DOMAINS and email_domain(e) not in ALLOWED_EMAIL_DOMAINS:
+        return False
+    return True
+
+def check_email(e: str):
+    """校验邮箱格式与域名白名单；不合格直接抛 HTTPException（带明确提示）。"""
+    if not e or len(e) > 120 or not EMAIL_RE.match(e):
+        raise HTTPException(400, "邮箱格式不正确")
+    if ALLOWED_EMAIL_DOMAINS and email_domain(e) not in ALLOWED_EMAIL_DOMAINS:
+        raise HTTPException(400, "仅支持 " + ALLOWED_DOMAINS_HINT + " 邮箱")
+
+def send_mail(to_addr: str, subject: str, body: str):
+    """发送纯文本邮件（标准库 smtplib，不引入额外依赖）。"""
+    import smtplib, ssl as _ssl
+    from email.message import EmailMessage
+    from email.header import Header
+    msg = EmailMessage()
+    msg["Subject"] = str(Header(subject, "utf-8"))
+    msg["From"] = SMTP_FROM
+    msg["To"] = to_addr
+    msg.set_content(body, charset="utf-8")
+    if SMTP_SSL:
+        with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=20,
+                              context=_ssl.create_default_context()) as s:
+            s.login(SMTP_USER, SMTP_PASS)
+            s.send_message(msg)
+    else:
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=20) as s:
+            s.ehlo()
+            if SMTP_TLS:
+                s.starttls(context=_ssl.create_default_context())
+                s.ehlo()
+            s.login(SMTP_USER, SMTP_PASS)
+            s.send_message(msg)
+
 # 用户名: 2-20位, 字母/数字/下划线/中文/点/横线
 USERNAME_RE = re.compile(r"^[A-Za-z0-9_\u4e00-\u9fa5.\-]{2,20}$")
 
@@ -65,7 +125,7 @@ app.mount("/static", StaticFiles(directory="/opt/tomato-multi/app/static"), name
 # ---- 允许匿名访问的接口白名单(其余 /api/* 一律要求登录) ----
 PUBLIC_API = {"/api/register", "/api/login", "/api/logout", "/api/auth_check",
               "/api/download/app", "/api/human/status", "/api/human/verify",
-              "/api/admin/login"}
+              "/api/admin/login", "/api/register/send_code", "/api/site_info"}
 
 def bj_now():
     """北京时间(UTC+8)。服务器运行在 UTC, 这里加 8 小时。"""
@@ -76,6 +136,7 @@ db.init_db()
 # ---------- 全局安全中间件(默认拒绝 + 安全响应头) ----------
 _login_fails = {}          # key -> [fail_count, locked_until_ts]
 _reg_ips = {}              # ip -> [count, window_start]
+_mail_ips = {}             # ip -> [code_send_count, window_start]
 LOGIN_MAX_FAILS = 5
 LOGIN_LOCK_SECS = 300
 
@@ -267,6 +328,14 @@ def turnstile_verify(token: str, ip: str) -> bool:
         print("turnstile verify error:", e)
         return False
 
+@app.get("/api/site_info")
+async def site_info():
+    """公开站点配置：前端据此决定是否显示邮箱验证字段。"""
+    return {"email_verify": EMAIL_VERIFY,
+            "human_required": bool(TURNSTILE_SITEKEY and TURNSTILE_SECRET),
+            "code_ttl": db.CODE_TTL,
+            "allowed_domains": sorted(ALLOWED_EMAIL_DOMAINS)}
+
 @app.get("/api/human/status")
 async def human_status(request: Request):
     """前端用来判断是否需要弹出真人校验（超管豁免）。"""
@@ -293,6 +362,41 @@ async def human_verify(data: dict, request: Request):
     return resp
 
 # ---------- 用户API ----------
+@app.post("/api/register/send_code")
+async def register_send_code(data: dict, request: Request):
+    """发送注册邮箱验证码（仅当 SMTP 配置齐全时可用）。"""
+    if not human_ok(request):
+        raise HTTPException(403, "请先完成真人校验")
+    if not EMAIL_VERIFY:
+        raise HTTPException(503, "邮箱验证暂未开启")
+    email = (data.get("email") or "").strip().lower()
+    check_email(email)
+    if db.get_user_by_email(email):
+        raise HTTPException(400, "该邮箱已被注册")
+    ip = _client_ip(request)
+    rec = _mail_ips.get(ip) or [0, time.time()]
+    if time.time() - rec[1] > 3600:
+        rec = [0, time.time()]
+    if rec[0] >= 10:
+        raise HTTPException(429, "发送过于频繁，请稍后再试")
+    code, err = db.issue_email_code(email, ip)
+    if err:
+        raise HTTPException(429, err)
+    rec[0] += 1
+    _mail_ips[ip] = rec
+    body = (
+        "您好，\n\n"
+        "您正在注册「番茄小说下载器」。本次验证码为：\n\n"
+        "        {code}\n\n"
+        "验证码 {ttl} 分钟内有效。如非本人操作，请忽略本邮件。\n\n"
+        "—— 番茄小说下载器"
+    ).format(code=code, ttl=db.CODE_TTL // 60)
+    try:
+        send_mail(email, "【番茄小说下载器】注册验证码", body)
+    except Exception as e:
+        raise HTTPException(502, "邮件发送失败：" + str(e)[:120])
+    return {"ok": True, "expires_in": db.CODE_TTL}
+
 @app.post("/api/register")
 async def register(data: dict, request: Request):
     if not human_ok(request):
@@ -303,7 +407,22 @@ async def register(data: dict, request: Request):
         raise HTTPException(400, "用户名需为 2-20 位(字母/数字/下划线/中文)")
     if not valid_password(password):
         raise HTTPException(400, "密码长度需为 6-72 位")
-    # 简单限流: 每 IP 每小时最多注册 10 个
+    # 先查用户名：避免"用户名已存在"把验证码白白消耗掉
+    if db.get_user_by_name(username):
+        raise HTTPException(400, "用户名已存在")
+    # 邮箱验证（配置了 SMTP 才强制）
+    email = (data.get("email") or "").strip().lower()
+    if EMAIL_VERIFY:
+        check_email(email)
+        if db.get_user_by_email(email):
+            raise HTTPException(400, "该邮箱已被注册")
+        code = (data.get("code") or "").strip()
+        if not code:
+            raise HTTPException(400, "请填写邮箱验证码")
+        err = db.verify_email_code(email, code)
+        if err:
+            raise HTTPException(400, err)
+    # 限流: 每 IP 每小时最多注册 10 个
     ip = _client_ip(request)
     rec = _reg_ips.get(ip) or [0, time.time()]
     if time.time() - rec[1] > 3600:
@@ -312,9 +431,8 @@ async def register(data: dict, request: Request):
         raise HTTPException(429, "注册过于频繁，请稍后再试")
     rec[0] += 1
     _reg_ips[ip] = rec
-    if db.get_user_by_name(username):
-        raise HTTPException(400, "用户名已存在")
-    uid = db.create_user(username, hash_pw(password))
+    uid = db.create_user(username, hash_pw(password),
+                         email=(email if EMAIL_VERIFY else None))
     if not uid:
         raise HTTPException(400, "注册失败")
     u = db.get_user_by_id(uid)
