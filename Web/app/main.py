@@ -77,22 +77,47 @@ _domains_raw = (os.environ.get("EMAIL_ALLOWED_DOMAINS")
 ALLOWED_EMAIL_DOMAINS = {d.strip().lower() for d in _domains_raw.split(",") if d.strip()}
 ALLOWED_DOMAINS_HINT = " / ".join("@" + d for d in sorted(ALLOWED_EMAIL_DOMAINS))
 
+# 各服务商「@ 前面」的严格规则，防止随手乱填（如 abc@qq.com）
+EMAIL_LOCAL_RULES = {
+    "qq.com":    (re.compile(r"^\d{5,12}$"),
+                  "QQ 邮箱前缀必须是 5-12 位数字（你的 QQ 号）"),
+    "163.com":   (re.compile(r"^[A-Za-z][A-Za-z0-9_.\-]{2,19}$"),
+                  "163 邮箱前缀需以字母开头、共 3-20 位"),
+    "gmail.com": (re.compile(r"^[A-Za-z0-9][A-Za-z0-9._%+\-]{5,29}$"),
+                  "Gmail 前缀需 6-30 位字母/数字/点"),
+}
+
 def email_domain(e: str) -> str:
     return e.rsplit("@", 1)[-1].lower() if "@" in e else ""
+
+def email_local(e: str) -> str:
+    return e.split("@", 1)[0] if "@" in e else ""
+
+def _local_rule_ok(e: str):
+    """返回 (是否通过, 错误提示)。"""
+    rule = EMAIL_LOCAL_RULES.get(email_domain(e))
+    if not rule:
+        return True, ""
+    rx, msg = rule
+    return bool(rx.match(email_local(e))), msg
 
 def valid_email(e: str) -> bool:
     if not e or len(e) > 120 or not EMAIL_RE.match(e):
         return False
     if ALLOWED_EMAIL_DOMAINS and email_domain(e) not in ALLOWED_EMAIL_DOMAINS:
         return False
-    return True
+    ok, _ = _local_rule_ok(e)
+    return ok
 
 def check_email(e: str):
-    """校验邮箱格式与域名白名单；不合格直接抛 HTTPException（带明确提示）。"""
+    """校验邮箱：通用格式 + 域名白名单 + 服务商前缀规则。不合格抛 HTTPException。"""
     if not e or len(e) > 120 or not EMAIL_RE.match(e):
         raise HTTPException(400, "邮箱格式不正确")
     if ALLOWED_EMAIL_DOMAINS and email_domain(e) not in ALLOWED_EMAIL_DOMAINS:
         raise HTTPException(400, "仅支持 " + ALLOWED_DOMAINS_HINT + " 邮箱")
+    ok, msg = _local_rule_ok(e)
+    if not ok:
+        raise HTTPException(400, msg)
 
 def send_mail(to_addr: str, subject: str, body: str):
     """发送纯文本邮件（标准库 smtplib，不引入额外依赖）。"""
@@ -602,8 +627,7 @@ async def me_set_email(data: dict, request: Request):
     """补填邮箱（无需验证码）。用于老用户强制补全邮箱。"""
     user = current_user(request)
     email = (data.get("email") or "").strip().lower()
-    if not email or len(email) > 120 or not EMAIL_RE.match(email):
-        raise HTTPException(400, "邮箱格式不正确")
+    check_email(email)          # 通用格式 + 域名白名单 + 服务商前缀规则
     other = db.get_user_by_email(email)
     if other and other["id"] != user["id"]:
         raise HTTPException(400, "该邮箱已被其他账号使用")
