@@ -1,5 +1,5 @@
 """数据库层：SQLite，用户与实例管理。启用 WAL + busy_timeout 避免锁问题。"""
-import sqlite3, os, time, threading
+import sqlite3, os, time, threading, hashlib
 
 DB_PATH = "/opt/tomato-multi/app/data/data.db"
 DATA_ROOT = "/opt/tomato-multi/data/users"
@@ -45,11 +45,25 @@ def init_db():
     """)
     # 兼容旧库: 补列
     for col, ddl in [("is_super", "ALTER TABLE users ADD COLUMN is_super INTEGER DEFAULT 0"),
-                     ("pwd_version", "ALTER TABLE users ADD COLUMN pwd_version INTEGER DEFAULT 0")]:
+                     ("pwd_version", "ALTER TABLE users ADD COLUMN pwd_version INTEGER DEFAULT 0"),
+                     ("email", "ALTER TABLE users ADD COLUMN email TEXT")]:
         try:
             c.execute(ddl)
         except sqlite3.OperationalError:
             pass
+    # 邮箱验证码（注册用）：只存哈希，不存明文
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS email_codes (
+            email       TEXT PRIMARY KEY,
+            code_hash   TEXT NOT NULL,
+            expires_at  INTEGER NOT NULL,
+            attempts    INTEGER DEFAULT 0,
+            sent_at     INTEGER NOT NULL,
+            send_count  INTEGER DEFAULT 0,
+            window_start INTEGER,
+            ip          TEXT
+        )
+    """)
     conn.commit()
     conn.close()
 
@@ -71,9 +85,10 @@ def next_subdomain():
         n += 1
     return f"u{n}"
 
-def create_user(username, password_hash, data_dir=None):
+def create_user(username, password_hash, data_dir=None, email=None):
     """创建用户。子域名/端口/数据目录三者确定性绑定：
        子域名 uN  ->  端口 19000+(N-1)  ->  目录 DATA_ROOT/uN
+    email: 可选；有邮箱验证时传入（已校验通过）
     """
     sub = next_subdomain()
     port = 19000 + int(sub[1:]) - 1
@@ -82,9 +97,9 @@ def create_user(username, password_hash, data_dir=None):
     conn = _connect()
     try:
         conn.execute(
-            "INSERT INTO users(username,password_hash,subdomain,port,data_dir,status,created_at) "
-            "VALUES(?,?,?,?,?, 'active', ?)",
-            (username, password_hash, sub, port, data_dir, int(time.time())),
+            "INSERT INTO users(username,password_hash,subdomain,port,data_dir,email,status,created_at) "
+            "VALUES(?,?,?,?,?,?, 'active', ?)",
+            (username, password_hash, sub, port, data_dir, email, int(time.time())),
         )
         conn.commit()
         row = conn.execute("SELECT id FROM users WHERE username=?", (username,)).fetchone()
@@ -191,3 +206,83 @@ def bump_pwd_version(uid):
 
 def update_password(uid, password_hash):
     _exec("UPDATE users SET password_hash=? WHERE id=?", (password_hash, uid))
+
+# ---------- 邮箱验证码（注册用；只存哈希，不存明文） ----------
+CODE_TTL = 600                  # 验证码有效期 10 分钟
+CODE_MAX_ATTEMPTS = 5           # 同一验证码最多试 5 次
+CODE_MAX_SEND_PER_HOUR = 5      # 同一邮箱每小时最多发 5 封
+
+def _code_hash(code) -> str:
+    return hashlib.sha256(("tomato:" + str(code).strip()).encode()).hexdigest()
+
+def issue_email_code(email, ip=""):
+    """生成并保存验证码。返回 (code, None) 或 (None, 错误信息)。"""
+    now = int(time.time())
+    conn = _connect()
+    try:
+        row = conn.execute(
+            "SELECT send_count, window_start FROM email_codes WHERE email=?", (email,)
+        ).fetchone()
+        send_count, window_start = 0, now
+        if row:
+            send_count = row["send_count"] or 0
+            window_start = row["window_start"] or now
+            if now - window_start > 3600:      # 窗口过期，重新计数
+                send_count, window_start = 0, now
+            if send_count >= CODE_MAX_SEND_PER_HOUR:
+                left = 3600 - (now - window_start)
+                return None, "发送过于频繁，请 {} 分钟后再试".format(max(1, left // 60))
+        code = "{:06d}".format(secrets.randbelow(1000000))
+        conn.execute(
+            "INSERT INTO email_codes(email,code_hash,expires_at,attempts,sent_at,send_count,window_start,ip) "
+            "VALUES(?,?,?,0,?,?,?,?) "
+            "ON CONFLICT(email) DO UPDATE SET code_hash=excluded.code_hash, "
+            "expires_at=excluded.expires_at, attempts=0, sent_at=excluded.sent_at, "
+            "send_count=excluded.send_count, window_start=excluded.window_start, ip=excluded.ip",
+            (email, _code_hash(code), now + CODE_TTL, now, send_count + 1, window_start, ip),
+        )
+        conn.commit()
+        return code, None
+    finally:
+        conn.close()
+
+def verify_email_code(email, code):
+    """校验验证码。返回 None=通过，否则返回错误信息。"""
+    now = int(time.time())
+    conn = _connect()
+    try:
+        row = conn.execute("SELECT * FROM email_codes WHERE email=?", (email,)).fetchone()
+        if not row:
+            return "请先获取邮箱验证码"
+        if (row["expires_at"] or 0) < now:
+            conn.execute("DELETE FROM email_codes WHERE email=?", (email,))
+            conn.commit()
+            return "验证码已过期，请重新获取"
+        if (row["attempts"] or 0) >= CODE_MAX_ATTEMPTS:
+            return "错误次数过多，请重新获取验证码"
+        if _code_hash(code) != row["code_hash"]:
+            conn.execute("UPDATE email_codes SET attempts=attempts+1 WHERE email=?", (email,))
+            conn.commit()
+            left = CODE_MAX_ATTEMPTS - (row["attempts"] or 0) - 1
+            return "验证码不正确（还可尝试 {} 次）".format(max(0, left))
+        conn.execute("DELETE FROM email_codes WHERE email=?", (email,))
+        conn.commit()
+        return None
+    finally:
+        conn.close()
+
+def get_user_by_email(email):
+    conn = _connect()
+    r = conn.execute(
+        "SELECT * FROM users WHERE lower(email)=?", ((email or "").strip().lower(),)
+    ).fetchone()
+    conn.close()
+    return dict(r) if r else None
+
+def cleanup_expired_codes():
+    conn = _connect()
+    try:
+        conn.execute("DELETE FROM email_codes WHERE expires_at < ?", (int(time.time()),))
+        conn.commit()
+    finally:
+        conn.close()
