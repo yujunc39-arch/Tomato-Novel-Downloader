@@ -627,24 +627,14 @@ async def me(request: Request):
 
 @app.post("/api/me/email")
 async def me_set_email(data: dict, request: Request):
-    """补填邮箱（无需验证码）。用于老用户强制补全邮箱。"""
-    user = current_user(request)
-    email = (data.get("email") or "").strip().lower()
-    check_email(email, strict_domain=False)   # 补填放宽域名限制，但仍校验格式与服务商前缀
-    other = db.get_user_by_email(email)
-    if other and other["id"] != user["id"]:
-        raise HTTPException(400, "该邮箱已被其他账号使用")
-    db.set_email(user["id"], email)
-    return {"ok": True, "email": email}
+    """补填邮箱功能已关闭（注册时必须通过邮箱验证，不支持事后补填）。"""
+    raise HTTPException(403, "补填邮箱功能已关闭，请重新注册")
 
 # ---------- 用户自己的库/实例 ----------
 @app.post("/api/me/start")
 async def me_start(request: Request):
     """懒启动当前用户的番茄实例。"""
     user = current_user(request)
-    # 未补全邮箱不准开实例（管理员豁免）
-    if not user["is_admin"] and not (user.get("email") or "").strip():
-        raise HTTPException(403, "请先填写邮箱后再启动下载空间")
     instances.render_nginx()   # 确保子域名反代存在
     ok = instances.start_instance(user["id"], user["port"], user["data_dir"])
     db.touch(user["id"])
