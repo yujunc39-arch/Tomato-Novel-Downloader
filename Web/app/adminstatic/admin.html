@@ -97,6 +97,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC
     <div class="row">
       <input class="input" id="nuUser" placeholder="用户名">
       <input class="input" id="nuPass" type="password" placeholder="密码">
+      <input class="input" id="nuEmail" type="email" placeholder="邮箱（可选）" autocomplete="off">
       <label style="font-size:13px;color:#8a6d54;display:flex;align-items:center;gap:4px"><input type="checkbox" id="nuAdmin">管理员</label>
       <button class="btn" onclick="addUser()">添加</button>
     </div>
@@ -439,11 +440,16 @@ async function del(id){if(!confirm('确认删除该用户及其所有数据?'))r
 async function addUser(){
   const u=document.getElementById('nuUser').value.trim();
   const p=document.getElementById('nuPass').value;
+  const em=(document.getElementById('nuEmail')?.value||'').trim();
   const adm=document.getElementById('nuAdmin').checked;
+  if(!u||!p){alert('请填写用户名和密码');return;}
   try{
-    await api('/api/admin/register',{method:'POST',body:JSON.stringify({username:u,password:p,is_admin:adm})});
-    document.getElementById('nuUser').value='';document.getElementById('nuPass').value='';
+    const d=await api('/api/admin/register',{method:'POST',body:JSON.stringify({username:u,password:p,is_admin:adm,email:em})});
+    document.getElementById('nuUser').value='';
+    document.getElementById('nuPass').value='';
+    document.getElementById('nuEmail').value='';
     refresh();
+    if(em && d && d.email){ /* 静默成功 */ }
   }catch(e){alert(e.message);}
 }
 async function showSpace(id){
