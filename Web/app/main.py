@@ -888,6 +888,25 @@ async def admin_setadmin(uid: int, data: dict, request: Request):
     audit(me, request, "设置管理员", f"目标用户={target['username']}(uid={uid}) 设为={data.get('is_admin', False)}")
     return {"ok": True}
 
+@app.post("/api/admin/users/{uid}/set_email")
+async def admin_set_email(uid: int, data: dict, request: Request):
+    """管理员给用户设置/修改邮箱（与注册同规则：格式 + 域名白名单 + 前缀规则）。"""
+    me = admin_required(request)
+    target = db.get_user_by_id(uid)
+    if not target:
+        raise HTTPException(404, "用户不存在")
+    guard_target(me, target)
+    email = (data.get("email") or "").strip().lower()
+    check_email(email)
+    other = db.get_user_by_email(email)
+    if other and other["id"] != uid:
+        raise HTTPException(400, "该邮箱已被其他账号使用")
+    old = (target.get("email") or "").strip()
+    db.set_email(uid, email)
+    audit(me, request, "设置用户邮箱",
+          f"目标用户={target['username']}(uid={uid}) {old or '(空)'} -> {email}")
+    return {"ok": True, "email": email}
+
 @app.get("/api/admin/user_files/{uid}")
 async def admin_user_files(uid: int, request: Request, path: str = ""):
     """管理员浏览任意用户的「用户空间」内容(可进入子目录)。"""
