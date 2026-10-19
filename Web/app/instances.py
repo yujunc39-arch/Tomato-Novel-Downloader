@@ -96,6 +96,12 @@ def ensure_save_path(data_dir):
 def start_instance(uid, port, data_dir):
     """启动一个用户的番茄实例(串行化)。返回 True 若已运行或启动成功。"""
     data_dir = data_dir or os.path.join(BASE_DATA, f"u{uid}")
+    # 先校验/修正 save_path —— 放在最前面，即使实例已在运行也要保证配置正确
+    try:
+        os.makedirs(data_dir, exist_ok=True)
+        ensure_save_path(data_dir)
+    except Exception as e:
+        print("ensure_save_path failed:", e)
     with _start_lock:
         # 已跟踪且存活
         with _lock:
@@ -106,7 +112,6 @@ def start_instance(uid, port, data_dir):
         if _port_open("127.0.0.1", port):
             return True
         os.makedirs(data_dir, exist_ok=True)
-        ensure_save_path(data_dir)      # 防串目录/写到程序目录
         env = dict(os.environ)
         env["TOMATO_WEB_ADDR"] = f"127.0.0.1:{port}"
         proc = subprocess.Popen(
