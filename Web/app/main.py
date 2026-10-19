@@ -45,6 +45,13 @@ HUMAN_TTL = 24 * 3600        # 通过校验后 24 小时内免重复验证
 if TURNSTILE_SITEKEY and not TURNSTILE_SECRET:
     print("warn: TURNSTILE_SITEKEY 已配置但缺少 TURNSTILE_SECRET，真人校验将不可用")
 
+# ---- 管理员角色开关 ----
+# 0（默认）= 暂停管理员权能：管理后台仅超级管理员可进，
+#             普通管理员等同普通用户（能正常用自己的下载空间，但碰不到后台）
+# 1 = 恢复：普通管理员可用后台
+ADMIN_ROLE_ENABLED = ((os.environ.get("ADMIN_ROLE_ENABLED")
+                       or _ENV.get("ADMIN_ROLE_ENABLED") or "0").strip() == "1")
+
 # ---- 邮件发送（注册邮箱验证）。SMTP_HOST/USER/PASS 都配置齐才会启用 ----
 SMTP_HOST = (os.environ.get("SMTP_HOST") or _ENV.get("SMTP_HOST") or "").strip()
 SMTP_PORT = int((os.environ.get("SMTP_PORT") or _ENV.get("SMTP_PORT") or "465").strip() or 465)
@@ -337,6 +344,9 @@ def admin_required(request: Request, authorization: str | None = None):
     user = current_user(request)
     if not user["is_admin"]:
         raise HTTPException(403, "需要管理员权限")
+    # 管理员角色暂停期间，后台只开放给超级管理员
+    if not ADMIN_ROLE_ENABLED and not user.get("is_super"):
+        raise HTTPException(403, "管理功能已暂停，仅超级管理员可用")
     return user
 
 def guard_target(me, target, action="操作"):
@@ -637,6 +647,10 @@ async def admin_login(data: dict, request: Request):
         # 非管理员账号：也计入失败次数，避免该接口被用来批量撞普通账号
         _login_fail(key)
         raise HTTPException(403, "该账号无权访问管理后台")
+    # 管理员角色暂停期间，仅超级管理员可登录后台
+    if not ADMIN_ROLE_ENABLED and not user.get("is_super"):
+        _login_fail(key)
+        raise HTTPException(403, "管理后台已暂停，仅超级管理员可登录")
     _login_ok(key)
     pv = db.get_pwd_version(user["id"])
     sid = db.create_session(user["id"], pv)
@@ -1253,6 +1267,9 @@ async def admin_page(request: Request):
     u = _cookie_user(request)
     no_cache = {"Cache-Control": "no-store, no-cache, must-revalidate"}
     if not u or not u["is_admin"]:
+        return FileResponse("/opt/tomato-multi/app/adminstatic/login.html", headers=no_cache)
+    # 管理员角色暂停期间，后台页面只给超级管理员
+    if not ADMIN_ROLE_ENABLED and not u.get("is_super"):
         return FileResponse("/opt/tomato-multi/app/adminstatic/login.html", headers=no_cache)
     return FileResponse("/opt/tomato-multi/app/adminstatic/admin.html", headers=no_cache)
 
