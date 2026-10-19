@@ -1116,13 +1116,21 @@ async def admin_register(data: dict, request: Request):
         raise HTTPException(403, "只有超级管理员可以新增用户")
     username = (data.get("username") or "").strip()
     password = data.get("password") or ""
+    email = (data.get("email") or "").strip().lower()
     if not valid_username(username):
         raise HTTPException(400, "用户名需为 2-20 位(字母/数字/下划线/中文)")
     if not valid_password(password):
         raise HTTPException(400, "密码长度需为 6-72 位")
     if db.get_user_by_name(username):
         raise HTTPException(400, "用户名已存在")
-    uid = db.create_user(username, hash_pw(password))
+    # 邮箱可选；填了就必须合法且未被占用（与注册同规则）
+    if email:
+        check_email(email)
+        if db.get_user_by_email(email):
+            raise HTTPException(400, "该邮箱已被其他账号使用")
+    uid = db.create_user(username, hash_pw(password), email=(email or None))
+    if not uid:
+        raise HTTPException(400, "新增用户失败")
     u = db.get_user_by_id(uid)
     d = u["data_dir"]
     os.makedirs(d, exist_ok=True)
@@ -1130,8 +1138,9 @@ async def admin_register(data: dict, request: Request):
     if data.get("is_admin"):
         db.set_admin(uid, True)
     instances.render_nginx()
-    audit(me, request, "新增用户", f"新用户={username}(uid={uid}) 管理员={bool(data.get('is_admin'))}")
-    return {"ok": True, "uid": uid}
+    audit(me, request, "新增用户",
+          f"新用户={username}(uid={uid}) 邮箱={email or '无'} 管理员={bool(data.get('is_admin'))}")
+    return {"ok": True, "uid": uid, "subdomain": u.get("subdomain"), "email": email}
 
 # ---------- 前端页面 ----------
 @app.get("/", response_class=HTMLResponse)
