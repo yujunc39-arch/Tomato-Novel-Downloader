@@ -409,8 +409,15 @@ function renderUsers(){
         : `<button class="btn green" onclick="unban(${u.id})">解封</button>`);
       ops.push(`<button class="btn ghost" onclick="del(${u.id})">删除</button>`);
     }
-    if(meIsSuper && !u.is_admin){
-      ops.push(`<button class="btn yellow" onclick="makeAdmin(${u.id})">设为管理</button>`);
+    if(meIsSuper && !u.is_super){
+      ops.push(u.is_admin
+        ? `<button class="btn ghost" onclick="setAdmin(${u.id}, false, '${esc(u.username)}')">取消管理</button>`
+        : `<button class="btn yellow" onclick="setAdmin(${u.id}, true, '${esc(u.username)}')">设为管理</button>`);
+    }
+    if(meIsSuper || isSelf || !tAdmin){
+      ops.push(u.email
+        ? `<button class="btn ghost" onclick="setUserEmail(${u.id}, '${esc(u.username)}', '${esc(u.email)}')">✉️ 改邮箱</button>`
+        : `<button class="btn ghost" style="color:#e8590c" onclick="setUserEmail(${u.id}, '${esc(u.username)}', '')">✉️ 补邮箱</button>`);
     }
     if(meIsSuper){
       ops.push(`<button class="btn ghost" onclick="resetPw(${u.id},'${esc(u.username)}')">🔑 重置密码</button>`);
@@ -426,7 +433,28 @@ async function ban(id){await api('/api/admin/users/'+id+'/ban',{method:'POST'});
 async function unban(id){await api('/api/admin/users/'+id+'/unban',{method:'POST'});refresh();}
 async function stopInst(id){try{await api('/api/admin/users/'+id+'/stop',{method:'POST'});}catch(e){alert(e.message);}refresh();}
 async function startInst(id){try{await api('/api/admin/users/'+id+'/start',{method:'POST'});}catch(e){alert(e.message);}refresh();}
-async function makeAdmin(id){await api('/api/admin/users/'+id+'/admin',{method:'POST',body:JSON.stringify({is_admin:true})});refresh();}
+async function setAdmin(id, isAdmin, uname){
+  if(!confirm(`确定把「${uname}」${isAdmin ? '设为管理员' : '取消管理员'}？`)) return;
+  try{
+    await api('/api/admin/users/'+id+'/admin',{method:'POST',body:JSON.stringify({is_admin:!!isAdmin})});
+    refresh();
+  }catch(e){ alert('❌ ' + e.message); }
+}
+async function setUserEmail(id, uname, cur){
+  const em = prompt(
+    `为「${uname}」${cur ? '修改' : '补填'}邮箱\n\n` +
+    `要求：\n· QQ：5-12 位纯数字@qq.com\n· 163：字母开头@163.com\n· Gmail：6 位以上@gmail.com`,
+    cur || ''
+  );
+  if(em===null) return;
+  const v = em.trim();
+  if(!v){ alert('邮箱不能为空'); return; }
+  try{
+    const d = await api('/api/admin/users/'+id+'/set_email',{method:'POST',body:JSON.stringify({email:v})});
+    alert('✅ 已保存：' + (d.email || v));
+    refresh();
+  }catch(e){ alert('❌ ' + e.message); }
+}
 async function resetPw(id, uname){
   const pw=prompt(`重置用户「${uname}」的密码\n请输入新密码(6-72位):`);
   if(pw===null) return;
