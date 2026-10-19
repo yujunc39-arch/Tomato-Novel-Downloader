@@ -472,6 +472,19 @@ async def human_verify(data: dict, request: Request):
     return resp
 
 # ---------- 用户API ----------
+def find_user_by_ident(ident: str):
+    """按「用户名」或「邮箱」查找用户（登录用）。
+    用户名规则不含 @，所以带 @ 的输入直接走邮箱。"""
+    ident = (ident or "").strip()
+    if not ident:
+        return None
+    u = db.get_user_by_name(ident)
+    if u:
+        return u
+    if "@" in ident:
+        return db.get_user_by_email(ident)
+    return None
+
 @app.post("/api/register/send_code")
 async def register_send_code(data: dict, request: Request):
     """发送注册邮箱验证码（仅当 SMTP 配置齐全时可用）。"""
@@ -583,10 +596,10 @@ async def login(data: dict, request: Request):
     left = _login_locked(key)
     if left:
         raise HTTPException(429, f"尝试过于频繁，请 {left} 秒后再试")
-    user = db.get_user_by_name(username)
+    user = find_user_by_ident(username)
     if not user or not user.get("password_hash") or not verify_pw(password, user["password_hash"]):
         _login_fail(key)
-        raise HTTPException(401, "用户名或密码错误")
+        raise HTTPException(401, "账号或密码错误")
     if user["status"] == "banned":
         raise HTTPException(403, "账号已被封禁")
     _login_ok(key)
@@ -594,7 +607,7 @@ async def login(data: dict, request: Request):
     sid = db.create_session(user["id"], pv)
     token = make_token(user["id"], user["is_admin"], sid, pv)
     db.touch(user["id"])
-    resp = JSONResponse({"ok": True, "token": token, "username": username,
+    resp = JSONResponse({"ok": True, "token": token, "username": user["username"],
                          "is_admin": bool(user["is_admin"])})
     # 下发跨子域 Cookie：用户访问 u<N>.domain 时浏览器自动携带，用于 nginx 鉴权
     try:
@@ -614,10 +627,10 @@ async def admin_login(data: dict, request: Request):
     left = _login_locked(key)
     if left:
         raise HTTPException(429, f"尝试过于频繁，请 {left} 秒后再试")
-    user = db.get_user_by_name(username)
+    user = find_user_by_ident(username)
     if not user or not user.get("password_hash") or not verify_pw(password, user["password_hash"]):
         _login_fail(key)
-        raise HTTPException(401, "用户名或密码错误")
+        raise HTTPException(401, "账号或密码错误")
     if user["status"] == "banned":
         raise HTTPException(403, "账号已被封禁")
     if not user["is_admin"]:
