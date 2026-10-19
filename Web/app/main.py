@@ -342,12 +342,19 @@ def current_user(request: Request, authorization: str | None = None):
 
 def admin_required(request: Request, authorization: str | None = None):
     user = current_user(request)
-    if not user["is_admin"]:
+    if not effective_admin(user):
+        # 管理员角色暂停期间，普通管理员连"需要管理员权限"都算不上
+        if user.get("is_admin"):
+            raise HTTPException(403, "管理功能已暂停，仅超级管理员可用")
         raise HTTPException(403, "需要管理员权限")
-    # 管理员角色暂停期间，后台只开放给超级管理员
-    if not ADMIN_ROLE_ENABLED and not user.get("is_super"):
-        raise HTTPException(403, "管理功能已暂停，仅超级管理员可用")
     return user
+
+def effective_admin(u) -> bool:
+    """实际生效的管理员权限。
+    ADMIN_ROLE_ENABLED=0 时，普通管理员与普通用户完全等同，只有超管算管理员。"""
+    if not u or not u.get("is_admin"):
+        return False
+    return bool(u.get("is_super")) or ADMIN_ROLE_ENABLED
 
 def guard_target(me, target, action="操作"):
     """普通管理员只能操作非管理员用户(自己或普通用户); 超级管理员不受限。"""
@@ -615,10 +622,10 @@ async def login(data: dict, request: Request):
     _login_ok(key)
     pv = db.get_pwd_version(user["id"])
     sid = db.create_session(user["id"], pv)
-    token = make_token(user["id"], user["is_admin"], sid, pv)
+    token = make_token(user["id"], effective_admin(user), sid, pv)
     db.touch(user["id"])
     resp = JSONResponse({"ok": True, "token": token, "username": user["username"],
-                         "is_admin": bool(user["is_admin"])})
+                         "is_admin": effective_admin(user)})
     # 下发跨子域 Cookie：用户访问 u<N>.domain 时浏览器自动携带，用于 nginx 鉴权
     try:
         resp.set_cookie("token", token, domain=COOKIE_DOMAIN, path="/",
@@ -707,11 +714,11 @@ async def me(request: Request):
     running = instances.is_running(user["id"])
     email = (user.get("email") or "").strip()
     return {"id": user["id"], "username": user["username"],
-            "subdomain": user["subdomain"], "is_admin": bool(user["is_admin"]),
+            "subdomain": user["subdomain"], "is_admin": effective_admin(user),
             "is_super": bool(user.get("is_super")), "status": user["status"],
             "email": email,
             # 管理员豁免；普通用户未填邮箱则前端强制弹窗
-            "need_email": (not user["is_admin"]) and (not email),
+            "need_email": (not effective_admin(user)) and (not email),
             "running": running,
             "started_at": instances.get_started_at(user["id"]) if running else None}
 
