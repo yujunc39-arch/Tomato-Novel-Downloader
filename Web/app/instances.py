@@ -52,6 +52,47 @@ def _free(uid):
         return False
     return True
 
+def ensure_save_path(data_dir):
+    """强制 config.yml 的 save_path 指向本用户目录。
+    背景：用户可能在 Web UI 里把 save_path 改成空串或任意路径，
+    导致书籍写到程序目录/别人目录（实测出现过 lin 和 u46 两例）。"""
+    cfg = os.path.join(data_dir, "config.yml")
+    want = os.path.join(data_dir, "books")
+    if not os.path.isfile(cfg):
+        return
+    try:
+        lines = open(cfg, encoding="utf-8", errors="replace").read().splitlines()
+    except Exception:
+        return
+    out, found, changed, cur = [], False, False, ""
+    for ln in lines:
+        s = ln.strip()
+        if s.startswith("save_path:"):
+            found = True
+            cur = s.split(":", 1)[1].strip().strip("'\"")
+            ok = False
+            if cur and os.path.isabs(cur):
+                try:
+                    ok = os.path.realpath(cur).startswith(os.path.realpath(data_dir) + os.sep)
+                except Exception:
+                    ok = False
+            if not ok:
+                out.append('save_path: "{}"'.format(want))
+                changed = True
+                continue
+        out.append(ln)
+    if not found:
+        out.append('save_path: "{}"'.format(want))
+        changed = True
+    if changed:
+        try:
+            os.makedirs(want, exist_ok=True)
+            with open(cfg, "w", encoding="utf-8") as f:
+                f.write("\n".join(out) + "\n")
+            print("fixed save_path {} -> {} (was: {!r})".format(data_dir, want, cur))
+        except Exception as e:
+            print("fix save_path failed:", e)
+
 def start_instance(uid, port, data_dir):
     """启动一个用户的番茄实例(串行化)。返回 True 若已运行或启动成功。"""
     data_dir = data_dir or os.path.join(BASE_DATA, f"u{uid}")
@@ -65,6 +106,7 @@ def start_instance(uid, port, data_dir):
         if _port_open("127.0.0.1", port):
             return True
         os.makedirs(data_dir, exist_ok=True)
+        ensure_save_path(data_dir)      # 防串目录/写到程序目录
         env = dict(os.environ)
         env["TOMATO_WEB_ADDR"] = f"127.0.0.1:{port}"
         proc = subprocess.Popen(
