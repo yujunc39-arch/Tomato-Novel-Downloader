@@ -141,8 +141,8 @@ ALLOWED_DOMAINS_HINT = " / ".join("@" + d for d in sorted(ALLOWED_EMAIL_DOMAINS)
 EMAIL_LOCAL_RULES = {
     "qq.com":    (re.compile(r"^\d{5,12}$"),
                   "QQ 邮箱前缀必须是 5-12 位数字（你的 QQ 号）"),
-    "163.com":   (re.compile(r"^[A-Za-z][A-Za-z0-9_.\-]{2,19}$"),
-                  "163 邮箱前缀需以字母开头、共 3-20 位"),
+    "163.com":   (re.compile(r"^(?:[A-Za-z][A-Za-z0-9_.\-]{2,19}|\d{3,20})$"),
+                  "163 邮箱前缀需为 3-20 位：字母开头，或纯数字"),
     "gmail.com": (re.compile(r"^[A-Za-z0-9][A-Za-z0-9._%+\-]{5,29}$"),
                   "Gmail 前缀需 6-30 位字母/数字/点"),
 }
