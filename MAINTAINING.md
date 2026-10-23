@@ -1,7 +1,11 @@
 # 维护指南
 
-本仓库是上游的增强 Fork，包含 **上游 Rust 核心 + 自研 Android 客户端 + 自研 Web 平台**。
+本仓库是上游的增强 Fork，包含 **上游 Rust 核心 + 自研 Android 客户端**。
 这份文档记录日常维护流程。
+
+> 🌐 多租户 Web 平台已独立成仓库
+> **[yujunc39-arch/Tomato-Web](https://github.com/yujunc39-arch/Tomato-Web)**，
+> 它的部署与运维不在本文档范围内。
 
 ---
 
@@ -11,10 +15,9 @@
 |------|--------|-----------|
 | `src/` `Cargo.toml` `Cargo.lock` `scripts/` `.github/workflows/` | 上游 | ❌ 不要改，会被 `merge upstream/main` 覆盖冲突 |
 | `Android/` | 本 Fork | ✅ 随便改 |
-| `Web/` | 本 Fork | ✅ 随便改 |
 | 根 `README.md` / 本文档 | 本 Fork | ✅ 随便改 |
 
-> 所有自研内容只放在 `Android/`、`Web/` 两个顶层目录里，
+> 所有自研内容只放在 `Android/` 一个顶层目录里，
 > 这样同步上游时**永远不会冲突**。
 
 ---
@@ -34,8 +37,6 @@ git push origin main
 git rev-list --count HEAD..upstream/main     # 应为 0
 git log --oneline -5
 ```
-
-**发布新版本二进制后**，线上平台的「版本管理」卡片即可一键更新（见下）。
 
 ---
 
@@ -90,61 +91,22 @@ export TOMATO_KS_ALIAS=release
 
 **版本号**：改 `Android/TomatoWeb/app/build.gradle.kts` 里的 `versionCode` / `versionName`。
 
----
-
-## 4. Web 平台维护
-
-部署见 [`Web/README.md`](Web/README.md)。
-
-日常运维：
-
-```bash
-systemctl status tomato-gateway              # 网关状态
-systemctl restart tomato-gateway             # 改 main.py/db.py/instances.py 后重启
-journalctl -u tomato-gateway -n 50           # 看日志
-nginx -s reload                              # 只改 nginx/证书
-
-bash Web/deploy/reload-nginx.sh              # 重新生成用户子域配置
-```
-
-关键可调参数：
-
-| 位置 | 含义 | 默认 |
-|------|------|------|
-| `Web/app/instances.py` `IDLE_TIMEOUT` | 实例空闲回收秒数 | `1200`（20 分钟） |
-| `Web/app/instances.py` `sweep_loop(interval)` | 扫描间隔 | 60 秒 |
-| `Web/app/main.py` `JWT_TTL` | 登录态有效期 | 30 天 |
-| `Web/app/main.py` `LOGIN_MAX_FAILS` / `LOGIN_LOCK_SECS` | 登录限流 | 5 次 / 300 秒 |
-| `Web/app/main.py` `HUMAN_TTL` | 真人校验免验时长 | 24 小时 |
-| `.env` `TURNSTILE_SITEKEY` / `TURNSTILE_SECRET` | 真人校验（留空=关闭） | 未配置 |
-
-**真人校验**（`.env` 配 `TURNSTILE_*` 即启用，留空即关闭）：
-- 全覆盖：主站落地页 + `/api/register` + `/api/login` + 用户子域 `auth_check`
-- **超管豁免**（只认已登录的超管会话，不认用户名）：`/api/human/status` 对超管会话返回 `required:false`，`auth_check` 跳过；**`/api/login` 不豁免**（避免用 403/401 差异探测超管账号）
-- **紧急关闭**：SSH 上服务器注释掉 `.env` 的 `TURNSTILE_*` 并重启网关即可整站关闭
-- 更新 `Web/app/static/announce.js` 后，记得把 nginx 注入 URL 的 `?v=N` 加一（否则浏览器用旧缓存）
-
-**用户数据**：`/opt/tomato-multi/data/users/u<N>/`
-- `config.yml`：该用户的下载配置（格式、保存路径等）
-- `books/`：下载产物（实例关闭时会被清空）
-- `logs/`：实例日志（实例关闭时会被清空）
-
-**审计**：`/opt/tomato-multi/app/data/audit.log`（时间 / IP / 操作人 / 动作 / 详情）
+**下载源**：App 从上游 Release 拉取二进制，如需换源改
+`Android/TomatoWeb/app/src/main/java/com/tomato/downloader/` 下的下载地址常量。
 
 ---
 
-## 5. 发布清单
+## 4. 发布清单
 
 - [ ] `git fetch upstream && git merge upstream/main` 无冲突
 - [ ] Rust：`bash ./scripts/maintain.sh` 全绿
 - [ ] Android：`./gradlew assembleRelease` 成功，`targetSdk` 仍为 28，版本号已递增
-- [ ] Web：`systemctl restart tomato-gateway` 后主站 / 后台 / 用户子域正常
 - [ ] 更新 `README.md` 的版本/结构说明（如有变化）
 - [ ] `git push origin main`
 
 ---
 
-## 6. 已知维护重点
+## 5. 已知维护重点
 
 - 第三方 API 相关代码不开源（上游策略），同步上游时注意别把新增的私密文件提交上去。
 - PDF 依赖链会引入旧版 `image/time`，包体积敏感时可考虑拆 feature。
@@ -156,3 +118,5 @@ bash Web/deploy/reload-nginx.sh              # 重新生成用户子域配置
 
   未配置时 `assembleRelease` 产出**未签名** APK（CI 只做编译校验时够用）。
   `dual_sign.py` 同样只从环境变量读取密钥。
+- **历史清理**：`*.jks` 曾误入仓库，已用 `git filter-repo` 从全部历史移除；
+  `.gitignore` 已加 `*.jks *.keystore keystore.properties *.pepk`，勿再提交。
