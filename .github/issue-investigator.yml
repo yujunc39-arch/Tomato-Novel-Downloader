@@ -1,0 +1,81 @@
+schemaVersion: 1
+
+cli:
+  install: preinstalled
+  versions:
+    codex: 0.163.0
+
+providers:
+  deepseek:
+    kind: compatible
+    baseUrl: https://api.deepseek.com
+    protocol: responses
+    model: deepseek-v4-pro
+    auth:
+      mode: environment
+      env: DEEPSEEK_API_KEY
+
+investigation:
+  engine: codex
+  provider: deepseek
+  # issue-assistant.yml is the controller; this Action job only starts after its gate passes.
+  trigger: always
+  triggerLabel: AI-Investigate
+  mode: execute
+  timeoutMinutes: 20
+  maxTurns: 20
+  workspace: workspace-write
+  # Ordinary public networking runs only inside a disposable container; credentials and publication stay outside.
+  approvalMode: never
+  network: true
+  isolation:
+    executor: container
+    cpus: 2
+    memoryMb: 4096
+    diskMb: 3072
+    pids: 256
+    modelRequests: 100
+    maxOutputTokens: 8192
+    publicNetworkMb: 512
+
+triage:
+  duplicateSearch: true
+  maxDuplicateCandidates: 8
+
+evidencePolicy:
+  unreproducedMaxPriority: medium
+  requireObservedCommandForReproduced: true
+  requireReplayForVerifiedSteps: true
+  allowUnreproducedHighImpactPriority: false
+
+replay:
+  enabled: false
+  executor: container
+  probes: {}
+
+mutation:
+  mode: suggest
+  confirmLabel: Confirm
+  rerunLabel: AI-Rerun
+  assignConfirmer: false
+  applySuggestedTitle: false
+  closeNegativeDispositions: false
+  rerunOnAuthorFollowup: false
+
+labels:
+  types:
+    bug: BUG
+    enhancement: Enhancement
+    documentation: Documentation
+    question: Question
+    unknown: Question
+  priorities:
+    critical: "🟪Critical"
+    high: "🟥High"
+    medium: "🟨Medium"
+    low: "🟩Low"
+  dispositions:
+    duplicate: Duplicate
+    wontfix: WontFix
+    invalid: Invalid
+  needsInfo: Needs-Info

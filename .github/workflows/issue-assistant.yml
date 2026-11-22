@@ -19,6 +19,8 @@ jobs:
     ai-review:
         if: github.event_name == 'issues' && (github.event.action == 'opened' || github.event.action == 'reopened' || (github.event.action == 'labeled' && (github.event.label.name == 'AI-Rerun' || github.event.label.name == 'ai-rerun')))
         runs-on: ubuntu-latest
+        outputs:
+            should_investigate: ${{ steps.analyze.outputs.should_investigate }}
         concurrency:
             group: issue-assistant-ai-review-${{ github.repository }}-${{ github.event.issue.number }}
             cancel-in-progress: false
@@ -49,43 +51,11 @@ jobs:
                         per_page: 100
                       });
 
-                      const isAiReviewComment = (comment) => {
-                        const text = String(comment?.body || '');
+                      const previous = comments.filter(comment => {
+                        if (comment.user?.type !== 'Bot' || comment.user?.login !== 'github-actions[bot]') return false;
+                        const text = String(comment.body || '');
                         return text.includes(aiReviewMarker) || text.includes(pendingMarker) || text.startsWith('## 🤖 AI 审查结果') || text.startsWith('## ⚠️ AI 审查');
-                      };
-
-                      let latestAiIndex = -1;
-                      for (let i = comments.length - 1; i >= 0; i--) {
-                        if (isAiReviewComment(comments[i])) {
-                          latestAiIndex = i;
-                          break;
-                        }
-                      }
-
-                      if (latestAiIndex >= 0) {
-                        const latestAi = comments[latestAiIndex];
-                        const hasNewerCommentBelow = comments.slice(latestAiIndex + 1).some(c => !isAiReviewComment(c));
-                        if (!hasNewerCommentBelow) {
-                          await github.rest.issues.updateComment({
-                            owner,
-                            repo,
-                            comment_id: latestAi.id,
-                            body: pendingBody
-                          });
-                          core.setOutput('comment_id', String(latestAi.id));
-                          return;
-                        }
-
-                        try {
-                          await github.rest.issues.deleteComment({
-                            owner,
-                            repo,
-                            comment_id: latestAi.id
-                          });
-                        } catch (e) {
-                          core.warning('Failed to delete old AI review comment: ' + e.message);
-                        }
-                      }
+                      });
 
                       const resp = await github.rest.issues.createComment({
                         owner,
@@ -95,6 +65,14 @@ jobs:
                       });
 
                       core.setOutput('comment_id', String(resp.data.id));
+                      // Keep the old result until the replacement comment exists.
+                      for (const comment of previous) {
+                        try {
+                          await github.rest.issues.deleteComment({ owner, repo, comment_id: comment.id });
+                        } catch (e) {
+                          if (e.status !== 404) core.warning('New AI review comment created, but an old bot comment could not be removed: ' + comment.id);
+                        }
+                      }
 
             - name: Analyze issue with DeepSeek
               id: analyze
@@ -177,7 +155,7 @@ jobs:
                       const allowedPriority = ['🟪Critical', '🟥High', '🟨Medium', '🟩Low'];
 
                       const baseUrl = process.env.OPENAI_BASE_URL || 'https://api.deepseek.com';
-                      const preferredModel = process.env.OPENAI_MODEL || 'deepseek-v4-flash';
+                      const preferredModel = process.env.OPENAI_MODEL || 'deepseek-flash';
 
                       if (!process.env.OPENAI_API_KEY) {
                         failAnalysis('missing DEEPSEEK_API_KEY secret');
@@ -200,7 +178,7 @@ jobs:
 
                           if (ids.includes(preferredModel)) return preferredModel;
 
-                          const candidates = ['deepseek-v4-flash', 'deepseek-v4-pro', 'deepseek-chat'];
+                          const candidates = ['deepseek-flash', 'deepseek-v4-pro', 'deepseek-v4-flash', 'deepseek-chat'];
                           for (const c of candidates) {
                             if (ids.includes(c)) return c;
                           }
@@ -449,6 +427,7 @@ jobs:
                         '核心目标：优先“完善用户意图”，而不是要求普通用户写专业方案。',
                         '请将用户原始描述整理为可执行意图，补齐合理上下文（在不臆造事实前提下）。',
                         '只有在“关键信息缺失会阻断处理”时才设置 needs_info=true。',
+                        '如果 BUG 已包含具体错误文本或日志附件，缺少可选的 BookID/复现步骤本身不应阻断代码侧调查；可将其列为可选补充。',
                         'need_more_info_items 必须是简短、低门槛、非技术化的补充建议（最多 2 条）。',
                         '不要要求普通用户提供架构设计、隐私策略、性能评估、复杂集成说明等专业材料。',
                         '项目背景：Tomato-Novel-Downloader 是 Rust 编写的番茄小说下载器，包含 TUI/Web UI、EPUB/TXT 输出、断点续传、搜索、配置、Docker、Termux、Edge TTS、有声小说生成、Official-API/no-official-api 双模式等功能。',
@@ -667,9 +646,22 @@ jobs:
                         return;
                       }
 
+                      // 深入调查由 issue-assistant 的结构化分诊结果决定，避免让 Issue 文本直接触发高成本 Agent。
+                      const investigationPriorities = new Set(['🟪Critical', '🟥High', '🟨Medium']);
+                      const hasDiagnosticEvidence = /github\.com\/user-attachments\/files\//i.test(safeIssueBody)
+                        || /(?:^|\n)\s*(?:ERROR|WARN|FATAL|panic|错误|异常|日志)\b/im.test(safeIssueBody)
+                        || /```[\s\S]{20,}```/.test(safeIssueBody);
+                      const isReadyForInvestigation = (!result.needs_info && result.confidence >= 0.75)
+                        || (hasDiagnosticEvidence && result.confidence >= 0.5);
+                      const shouldInvestigate = result.negative === 'none'
+                        && result.type === 'BUG'
+                        && isReadyForInvestigation
+                        && investigationPriorities.has(result.priority);
+
                       core.setOutput('analysis_result', JSON.stringify(result));
                       core.setOutput('analyze_ok', 'true');
                       core.setOutput('analyze_error', '');
+                      core.setOutput('should_investigate', shouldInvestigate ? 'true' : 'false');
                       } catch (e) {
                         failAnalysis(e?.message || e);
                       }
@@ -737,6 +729,7 @@ jobs:
               env:
                   AI_RESULT: ${{ steps.analyze.outputs.analysis_result }}
                   AI_COMMENT_ID: ${{ steps.pending_comment.outputs.comment_id }}
+                  SHOULD_INVESTIGATE: ${{ steps.analyze.outputs.should_investigate }}
               with:
                   github-token: ${{ secrets.GITHUB_TOKEN }}
                   script: |
@@ -850,6 +843,9 @@ jobs:
                       lines.push('');
                       lines.push('维护者如同意本次 AI 结果，请添加标签 `Confirm`，系统会自动执行标签落地并移除 `Confirm`。');
                       lines.push('如需再次触发 AI 重审，可添加标签 `AI-Rerun`。');
+                      if (String(process.env.SHOULD_INVESTIGATE || '').toLowerCase() === 'true') {
+                        lines.push('该 Issue 已满足深入调查条件，系统将继续检查代码路径与可验证证据。');
+                      }
                       lines.push(marker);
 
                       if (commentId > 0) {
@@ -867,6 +863,46 @@ jobs:
                           body: lines.join('\n')
                         });
                       }
+
+            - name: Trigger evidence-aware investigation for qualified bugs
+              if: always() && steps.analyze.outputs.analyze_ok == 'true' && steps.analyze.outputs.should_investigate == 'true'
+              uses: actions/github-script@v7
+              with:
+                  github-token: ${{ secrets.GITHUB_TOKEN }}
+                  script: |
+                      const owner = context.repo.owner;
+                      const repo = context.repo.repo;
+                      const issue_number = context.payload.issue.number;
+                      const triggerLabel = 'AI-Investigate';
+
+                      const current = await github.rest.issues.get({ owner, repo, issue_number });
+                      const hasTrigger = (current.data.labels || []).some(label => {
+                        const name = typeof label === 'string' ? label : label.name;
+                        return String(name || '').toLowerCase() === triggerLabel.toLowerCase();
+                      });
+                      if (hasTrigger) {
+                        core.info('Evidence-aware investigation is already queued.');
+                        return;
+                      }
+
+                      try {
+                        await github.rest.issues.createLabel({
+                          owner,
+                          repo,
+                          name: triggerLabel,
+                          color: '5319e7',
+                          description: 'Internal trigger for evidence-aware code investigation'
+                        });
+                      } catch (error) {
+                        if (error?.status !== 422) throw error;
+                      }
+
+                      await github.rest.issues.addLabels({
+                        owner,
+                        repo,
+                        issue_number,
+                        labels: [triggerLabel]
+                      });
 
             - name: Fallback comment when AI review fails
               if: always() && steps.analyze.outputs.analyze_ok != 'true'
@@ -923,6 +959,60 @@ jobs:
                         } catch {
                           // ignore absent label
                         }
+                      }
+
+    evidence_investigation:
+        needs: ai-review
+        if: needs.ai-review.outputs.should_investigate == 'true'
+        runs-on: ubuntu-24.04
+        timeout-minutes: 30
+        concurrency:
+            group: evidence-aware-issue-${{ github.repository }}-${{ github.event.issue.number }}
+            cancel-in-progress: false
+        steps:
+            - name: Build the isolated investigation environment
+              id: sandbox
+              run: |
+                  mkdir -p "$RUNNER_TEMP/eai-runtime"
+                  curl --fail --silent --show-error --location \
+                    https://raw.githubusercontent.com/zhongbai2333/Evidence-Aware-Issue-Investigator/995335b888da28199a7eb03a54ef49c44153e810/container/Dockerfile \
+                    --output "$RUNNER_TEMP/eai-runtime/Dockerfile"
+                  docker build --iidfile "$RUNNER_TEMP/eai-image.id" "$RUNNER_TEMP/eai-runtime"
+                  echo "image=$(cat "$RUNNER_TEMP/eai-image.id")" >> "$GITHUB_OUTPUT"
+
+            - name: Check out trusted default branch
+              uses: actions/checkout@v5
+              with:
+                  ref: ${{ github.event.repository.default_branch }}
+                  fetch-depth: 0
+                  persist-credentials: false
+
+            - name: Investigate issue evidence
+              id: investigate
+              uses: zhongbai2333/Evidence-Aware-Issue-Investigator@995335b888da28199a7eb03a54ef49c44153e810
+              env:
+                  DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+              with:
+                  github-token: ${{ github.token }}
+                  config-path: .github/issue-investigator.yml
+                  publish-comment: "true"
+                  container-image: ${{ steps.sandbox.outputs.image }}
+
+            - name: Remove investigation trigger label
+              if: always()
+              uses: actions/github-script@v7
+              with:
+                  github-token: ${{ github.token }}
+                  script: |
+                      try {
+                        await github.rest.issues.removeLabel({
+                          owner: context.repo.owner,
+                          repo: context.repo.repo,
+                          issue_number: context.payload.issue.number,
+                          name: 'AI-Investigate'
+                        });
+                      } catch (error) {
+                        if (error?.status !== 404) throw error;
                       }
 
     needs-info-comment-rerun:
