@@ -17,15 +17,16 @@
 ```
 .
 ├── Android/                  # 📱 本 Fork 唯一自研目录
-│   ├── TomatoWeb/            #    应用源码（App 名：Web For Tomato）
-│   │   ├── app/              #      Kotlin + Compose 源码
-│   │   ├── dual_sign.py      #      V1 + V2 双签名脚本
-│   │   ├── keystore.properties.example
-│   │   └── build.gradle.kts
-│   ├── android-env.sh        #    构建环境变量
-│   └── gradle-init.gradle    #    阿里云镜像加速（国内构建用）
+│   └── TomatoWeb/            #    Flutter 应用（App 名：Web For Tomato）
+│       ├── lib/              #      Dart 源码（3.x 全部 UI 与逻辑）
+│       ├── android/          #      安卓壳工程（Gradle / Manifest / 签名）
+│       ├── native_src/       #      沿用 2.x 的 Kotlin 服务管理实现
+│       ├── packages/prism_ui/#      自研 UI 组件库（FlClash 设计语言）
+│       ├── assets/           #      图标等资源
+│       └── pubspec.yaml      #      版本号 3.x
 │
 ├── src/                      # 🦀 上游 Rust 源码（请勿在此改业务）
+├── third-party/              #    上游第三方许可证
 ├── Cargo.toml / Cargo.lock   #    上游构建配置
 ├── installer.sh              #    上游 Termux / Linux 安装脚本
 ├── scripts/                  #    上游维护脚本
@@ -80,10 +81,11 @@
 |----|-----|
 | 包名 | `com.tomato.downloader` |
 | 应用名 | Web For Tomato |
-| 版本 | 2.1.8 (`versionCode 7795`) |
-| minSdk / targetSdk / compileSdk | **23 / 28 / 35** |
-| 语言 & UI | Kotlin + Jetpack Compose (Material 3) |
-| 架构 | Navigation Compose + `StateFlow` |
+| 版本 | 3.0.36 (`versionCode 8036`，见 `pubspec.yaml`) |
+| 框架 | **Flutter 3.47+ / Dart 3.10+**，UI 基于自研 `prism_ui`（FlClash 设计语言） |
+| 原生层 | Kotlin（`native_src/`：服务管理、端口、书库、前台服务） |
+| minSdk / targetSdk / compileSdk | **24 / 28 / 由 Flutter 决定** |
+| 签名 | V1 + V2，与 2.x 同一证书保证覆盖升级 |
 
 > ⚠️ **`targetSdk = 28` 是刻意为之**：Android 10 (API 29) 起 `filesDir` 被施加 W^X（`noexec`）保护，
 > 即使 `chmod +x` 也无法执行下载下来的原生二进制。降到 28 可获得该豁免。
@@ -92,31 +94,27 @@
 ### 构建
 
 ```bash
-source Android/android-env.sh        # 配置 JAVA_HOME / ANDROID_HOME
 cd Android/TomatoWeb
-./gradlew assembleRelease            # 或 assembleDebug
+flutter pub get
+flutter build apk --release          # 产物：build/app/outputs/flutter-apk/app-release.apk
 ```
 
-国内网络建议加 init script 走阿里云镜像：
+国内网络建议为 Flutter / Gradle 配置镜像（`PUB_HOSTED_URL`、`FLUTTER_STORAGE_BASE_URL`，
+以及 `android/` 的 init script），这些属于本机环境，不写进仓库。
+
+**签名密钥不进仓库** —— `android/app/build.gradle.kts` 按以下顺序读取：
 
 ```bash
-./gradlew --init-script ../gradle-init.gradle assembleRelease
+# A. keystore.properties（复制 keystore.properties.example，已 gitignore）
+#    storeFile=linjiusi.jks  storePassword=...  keyAlias=...  keyPassword=...
+# B. 环境变量
+export TOMATO_KS_FILE=linjiusi.jks TOMATO_KS_PASS='口令' TOMATO_KS_ALIAS=release
 ```
 
-产物：`Android/TomatoWeb/app/build/outputs/apk/release/app-release.apk`
+两者都没有时，`flutter build apk --release` 输出**未签名 APK**（仅用于编译校验）。
 
-> 仓库内还提供了 `Android/TomatoWeb/dual_sign.py`，用于手动做 V1 + V2 双签名
-> （先 zipalign，再 apksigner 签 V2，最后追加 JAR 签名，避免破坏 V2 块）。
-
-**签名密钥不进仓库** —— 二选一提供：
-
-```bash
-# A. 环境变量
-export TOMATO_KS_FILE=../release.jks TOMATO_KS_PASS='口令' TOMATO_KS_ALIAS=release
-# B. 本地 keystore.properties（复制 keystore.properties.example 修改，已 gitignore）
-```
-
-未配置时 `assembleRelease` 输出未签名 APK（CI 编译校验够用）。
+> `targetSdk = 28` 的取舍见上节；`Android/TomatoWeb/native_src/` 是 2.x 的原生服务管理实现，
+> 3.x 的 Dart 层通过平台通道复用它。
 
 ### 已下载书籍的存放位置
 
@@ -127,18 +125,27 @@ export TOMATO_KS_FILE=../release.jks TOMATO_KS_PASS='口令' TOMATO_KS_ALIAS=rel
 
 ## 同步上游
 
-本 Fork 只在上游基础上**新增** `Android/` 一个目录，理论上永远可以无冲突合并：
+本 Fork 只在上游基础上**新增** `Android/` 一个目录，同步方式是**按文件对齐**（不是 `git merge`）：
+两个仓库没有共同祖先（fork 时历史被重建过），直接 merge 会报 `refusing to merge unrelated histories`。
 
 ```bash
 git clone https://github.com/yujunc39-arch/Tomato-Novel-Downloader.git
 cd Tomato-Novel-Downloader
 git remote add upstream https://github.com/zhongbai2333/Tomato-Novel-Downloader.git
-git fetch upstream
-git merge upstream/main          # 无冲突（本地改动只在 Android/ 与文档）
+git fetch upstream main
+
+# 用上游覆盖它拥有的路径，本地 Android/ 与 README 保持不动
+git rm -rq src scripts third-party .github
+git checkout upstream/main -- src scripts third-party .github \
+    Cargo.toml Cargo.lock Cargo_no_official.toml build.rs installer.sh \
+    docker-entrypoint-webui.sh Dockerfile.webui Dockerfile.webui.musl \
+    .cargo .dockerignore .gitattributes img AI_NOT_FIX_CASES.md
+
+git add -A && git commit -m "chore: 同步上游 $(git show upstream/main:Cargo.toml | grep ^version | cut -d'"' -f2)"
 git push origin main
 ```
 
-> 若未来双方同时改动了同一文件，才需要手动解冲突。
+> 最近一次同步：上游 `2.4.18`（`src/` `Cargo.*` `scripts/` `.github/` 全部对齐，新增 `third-party/`）。
 > 因此**不要把业务代码写进上游目录**，避免 merge 冲突。
 
 ---

@@ -65,42 +65,42 @@ powershell -ExecutionPolicy Bypass -File .\scripts\maintain.ps1   # Windows
 ## 3. Android 客户端维护
 
 ```bash
-source Android/android-env.sh
 cd Android/TomatoWeb
-./gradlew assembleRelease
-# 产物: app/build/outputs/apk/release/app-release.apk
-
-# 国内网络加镜像
-./gradlew --init-script ../gradle-init.gradle assembleRelease
+flutter pub get
+flutter build apk --release
+# 产物: build/app/outputs/flutter-apk/app-release.apk
 ```
+
+3.x 是 **Flutter 应用**（`lib/` 为 Dart 源码，`native_src/` 为沿用 2.x 的 Kotlin 原生层），
+不再直接调 `./gradlew`；镜像与代理属于本机环境，配置在 `~/.gradle/gradle.properties`
+或 `PUB_HOSTED_URL` / `FLUTTER_STORAGE_BASE_URL`，不写进仓库。
 
 **签名**：密钥材料**不在仓库里**。构建前二选一：
 ```bash
 # 方式 A：环境变量
-export TOMATO_KS_FILE=../release.jks
+export TOMATO_KS_FILE=linjiusi.jks
 export TOMATO_KS_PASS='你的口令'
 export TOMATO_KS_ALIAS=release
 
-# 方式 B：本地 keystore.properties（复制 keystore.properties.example 修改）
+# 方式 B：Android/TomatoWeb/keystore.properties（复制 keystore.properties.example 修改，已 gitignore）
 ```
-`Android/TomatoWeb/dual_sign.py` 做 V1 + V2 双签名（zipalign → apksigner 签 V2 → 追加 JAR 签名，
-不破坏 V2 块），同样从环境变量 `TOMATO_KS_*` 读取密钥，并需要 `TOMATO_APK` 指向待签名 APK。
+两者都缺失时输出**未签名 APK**，仅供编译校验。签名走 Gradle 的 `signingConfigs`（V1 + V2）。
 
 > ⚠️ 改了 `targetSdk` 要小心：必须保持 **28**。
 > Android 10+ 会把 `filesDir` 挂载为 `noexec`，`targetSdk` 升到 29+ 就无法执行下载的原生二进制了。
 
-**版本号**：改 `Android/TomatoWeb/app/build.gradle.kts` 里的 `versionCode` / `versionName`。
+**版本号**：改 `Android/TomatoWeb/pubspec.yaml` 的 `version: 3.x.y+build`（Flutter 会同步到 `versionCode` / `versionName`）。
 
 **下载源**：App 从上游 Release 拉取二进制，如需换源改
-`Android/TomatoWeb/app/src/main/java/com/tomato/downloader/` 下的下载地址常量。
+`Android/TomatoWeb/native_src/com/tomato/downloader/core/ServerManager.kt` 里的下载地址常量。
 
 ---
 
 ## 4. 发布清单
 
-- [ ] `git fetch upstream && git merge upstream/main` 无冲突
+- [ ] `git fetch upstream main` 后按 README「同步上游」的文件对齐方式同步（两仓库无共同祖先，不能 merge）
 - [ ] Rust：`bash ./scripts/maintain.sh` 全绿
-- [ ] Android：`./gradlew assembleRelease` 成功，`targetSdk` 仍为 28，版本号已递增
+- [ ] Android：`flutter build apk --release` 成功，`targetSdk` 仍为 28，`pubspec.yaml` 版本号已递增
 - [ ] 更新 `README.md` 的版本/结构说明（如有变化）
 - [ ] `git push origin main`
 
@@ -116,7 +116,6 @@ export TOMATO_KS_ALIAS=release
   1. 环境变量 `TOMATO_KS_FILE` / `TOMATO_KS_PASS` / `TOMATO_KS_ALIAS`
   2. `Android/TomatoWeb/keystore.properties`（已 gitignore，参考 `keystore.properties.example`）
 
-  未配置时 `assembleRelease` 产出**未签名** APK（CI 只做编译校验时够用）。
-  `dual_sign.py` 同样只从环境变量读取密钥。
+  未配置时 `flutter build apk --release` 产出**未签名** APK（CI 只做编译校验时够用）。
 - **历史清理**：`*.jks` 曾误入仓库，已用 `git filter-repo` 从全部历史移除；
   `.gitignore` 已加 `*.jks *.keystore keystore.properties *.pepk`，勿再提交。

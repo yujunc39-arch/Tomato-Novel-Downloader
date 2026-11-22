@@ -1,0 +1,20 @@
+name: web_for_tomato
+description: Web For Tomato 3.0 — FlClash(prism_ui) 设计语言重构的 Flutter 界面，原生层沿用 Tomato-Novel-Downloader 服务管理逻辑。
+publish_to: none
+version: 3.0.36+8036
+
+environment:
+  sdk: '>=3.10.0 <4.0.0'
+  flutter: '>=3.47.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  intl: any
+  prism_ui:
+    path: packages/prism_ui
+
+flutter:
+  uses-material-design: false
+  assets:
+    - assets/images/icon.png
